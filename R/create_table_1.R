@@ -6,8 +6,37 @@
 # separate category with its own group)
 # 3) Guesses on what type of summary a variable receives
 # 4) Weights for table 1
+# 5) Fix bug: stratifying by month in airquality-example broken.
 
 
+#' Create a descriptive table as data frame and tinytable-object for LaTeX exports.
+#'
+#' @param data A data frame containing variables that are to be summarized.
+#' @param treatment_name An optional character string containing the name of a factor variable to stratify descriptives by. Default: none.
+#' @param sig_figs How many significant figures to print. Default: 2.
+#' @param labels An optional character vector of labels to replace variable names in the table. Should be provided in the order provided to the order-argument.
+#' @param order An optional character vector of variable names with the variable ordering desired for the table. Default: column order in the provided data frame.
+#' @param summarize_mean An optional character vector specifying which variables are to be summarized using means and standard deviations.
+#' @param summarize_median An optional character vector specifying which variables are to be summarized using medians and interquartile ranges.
+#' @param summarize_binary An optional character vector specifying binary factor variables to be summarized using counts and percentages.
+#' @param summarize_categorical An optional character vector specifying factor variables to be summarized using counts and percentages.
+#' @param include_overall If the table is stratified, should an additional non-stratified column be added? Default is 'end', making this the last column. Other options are 'beginning' and 'none'.
+#' @param groups A named list that can optionally be specified if some variables are supposed to be grouped under a header. Each list entry contains the name of the group, and a character vector with the corresponding variables.
+#'
+#' @return A list containing the descriptive table as a data frame, and a tinytable-object for exporting.
+#' @import tinytable
+#' @export
+#'
+#' @examples
+#' data(iris)
+#'
+#' get_table1(
+#' iris,
+#' labels = c("Sepal Length", "Sepal Width", "Petal Length", "Petal Width", "Species"),
+#' summarize_mean = c("Sepal.Length", "Sepal.Width"),
+#' summarize_median = c("Petal.Length", "Petal.Width"),
+#' summarize_categorical = "Species"
+#' )
 get_table1 <- function(data, treatment_name = NULL, sig_figs = 2, labels = NULL, order = NULL,
                        summarize_mean = NULL, summarize_median = NULL, summarize_binary = NULL,
                        summarize_categorical = NULL, include_overall = "end", groups = NULL) {
@@ -378,14 +407,14 @@ get_table1 <- function(data, treatment_name = NULL, sig_figs = 2, labels = NULL,
 
 
   # Now do the formatting...
-  get_formatted <- style_tt(
+  get_formatted <- tinytable::style_tt(
     tt(df_for_printing, width = 1, theme = "spacing"),
     i = 0:nrow(df_for_printing), j = 2:ncol(df_for_printing), align = "r"
   )
 
   if (!is.null(group_together)) {
 
-    get_formatted <- group_tt(get_formatted, j = list("Treatment" = group_together))
+    get_formatted <- tinytable::group_tt(get_formatted, j = list("Treatment" = group_together))
 
   }
 
@@ -394,6 +423,31 @@ get_table1 <- function(data, treatment_name = NULL, sig_figs = 2, labels = NULL,
 
 }
 
+#' Create a descriptive missingness table as data frame and tinytable-object for LaTeX exports.
+#'
+#' @param data A data frame containing variables that are to be summarized.
+#' @param subset Variables for which the missingness table is to be created. Usually a character vector; default 'missing_only' uses only variables with missings, and NULL uses all variables.
+#' @param treatment_name An optional character string containing the name of a factor variable to stratify descriptives by. Default: none.
+#' @param sig_figs How many significant figures to print. Default: 2.
+#' @param labels An optional character vector of labels to replace variable names in the table. Should be provided in the order provided to the order-argument.
+#' @param include_overall If the table is stratified, should an additional non-stratified column be added? Default is 'end', making this the last column. Other options are 'beginning' and 'none'.
+#' @param groups A named list that can optionally be specified if some variables are supposed to be grouped under a header. Each list entry contains the name of the group, and a character vector with the corresponding variables.
+#'
+#' @return A list containing the descriptive table as a data frame, and a tinytable-object for exporting.
+#' @import tinytable
+#' @export
+#'
+#' @examples
+#' data(airquality)
+#'
+#' get_missingness_table(
+#'  airquality,
+#'  subset = c("Ozone", "Solar.R", "Wind", "Temp"),
+#'  labels = c("Ozone Level", "Solar", "Wind", "Temperature")
+#' )
+#'
+#'
+#'
 get_missingness_table <- function(data, subset = "missing_only", treatment_name = NULL, sig_figs = 2,
                                   labels = NULL, include_overall = "end", groups = NULL) {
 
@@ -404,7 +458,7 @@ get_missingness_table <- function(data, subset = "missing_only", treatment_name 
   if (!is.data.frame(data)) stop ("Please ensure that provided data is in a data frame.")
 
   # Quick if-else to get subsets of the data, if desired
-  if (subset == "missing_only") {
+  if (identical(subset, "missing_only")) {
 
     get_subset <- unique(c(names(which(lapply(lapply(df, is.na), sum) > 0)),
                            treatment_name))
