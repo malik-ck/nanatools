@@ -10,3 +10,5 @@ Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.2
 Imports:
     tinytable
+URL: https://github.com/malik-ck/nanatools
+BugReports: https://github.com/malik-ck/nanatools/issues
