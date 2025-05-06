@@ -90,7 +90,7 @@ get_table1 <- function(data, treatment_name = NULL, sig_figs = 2, labels = NULL,
 
   # Remove missing data, report that this was done if the case
   data <- na.omit(data)
-  if (nrow(data) == nrow(na.omit(data))) {
+  if (nrow(data) != nrow(na.omit(data))) {
     warning("Missing data detected. Incomplete cases removed for tabulation.")
   }
 
@@ -142,38 +142,72 @@ get_table1 <- function(data, treatment_name = NULL, sig_figs = 2, labels = NULL,
   if (is.null(labels)) labels <- table1_order
 
   # Check that groups (if provided!) are consecutive and non-overlapping
-  make_index_list <- lapply(groups, function(x, data) which(table1_order %in% x), data = data)
+  check_non_duplicating(groups)
+  check_consecutive(groups, table1_order)
 
-  if (!is.null(groups)) {
+  # Now recursively replace column names by indices, which we will need for later
+  # Also add single groups for categorical variables here
+  replace_names_by_inds <- function(grps, varnames) {
 
-    if (length(unlist(groups)) != length(unique(unlist(groups)))) {
-      stop("Please ensure that each provided index for variable groups is unique.")
-    }
-
-    if (!all(unlist(lapply(make_index_list, function(x) all(min(x):max(x) == x))))) {
-      stop("Please ensure that all provided groups contain only variables next to each other in your data frame.")
-    }
+    lapply(
+      grps, function(x) {
+        if (is.list(x)) {
+          replace_names_by_inds(x, varnames)
+        } else {
+          which(varnames %in% x)
+        }
+      }
+    )
 
   }
 
-  # Check that no variable to be formatted categorically is in groups
-  if (any(colnames(data)[unlist(make_index_list)] %in% summarize_categorical)) {
-    stop("None of the grouping variables can be summarized categorically because categories are their own group.")
+  make_index_list <- replace_names_by_inds(groups, table1_order)
+
+  # If a categorical variable shows up in groups, make it its own category
+
+  if (!is.null(summarize_categorical)) {
+
+    get_cat_inds <- sapply(
+      summarize_categorical,
+      function(cats, nms) which(nms %in% cats), nms = table1_order
+    )
+
+    # Function to identify a path
+    find_path <- function(lst, target, path = list()) {
+      for (i in seq_along(lst)) {
+        new_path <- c(path, i)
+        item <- lst[[i]]
+
+        if (is.list(item)) {
+          result <- find_path(item, target, new_path)
+          if (!is.null(result)) return(result)
+        } else {
+          if (identical(item, target)) return(new_path)
+        }
+      }
+      return(NULL)
+    }
+
+    # Function to overwrite with a named list at a path
+    set_named_list_at_path <- function(lst, path, name, value_list) {
+      stopifnot(is.list(value_list))
+      if (length(path) == 1) {
+        lst[[path[[1]]]] <- NULL  # Remove the old item
+        lst <- append(lst, setNames(list(value_list), name), after = path[[1]] - 1)
+      } else {
+        lst[[path[[1]]]] <- set_named_list_at_path(lst[[path[[1]]]], path[-1], name, value_list)
+      }
+      return(lst)
+    }
+
+    for (i in 1:length(get_cat_inds)) {
+
+      get_path <- find_path(make_index_list, get_cat_inds[[i]])
+      make_index_list <- set_named_list_at_path(make_index_list, get_path, labels[[get_cat_inds[[i]]]], list(get_cat_inds[[i]]))
+
+    }
+
   }
-
-  # Add group indices implied by variables that are categorical
-  cat_indices <- unlist(
-    lapply(summarize_categorical,
-           function(x) {
-             index <- list(which(colnames(data) == x))
-             names(index) <- labels[[which(colnames(data) == x)]]
-             return(index)
-           }
-    ), recursive = FALSE
-  )
-
-  all_group_indices <- c(make_index_list, cat_indices)
-
 
   # Helper functions creating appropriate summaries
   style_mean <- function(x, sig_figs, var_label) {

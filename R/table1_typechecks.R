@@ -2,6 +2,8 @@
 
 check_non_duplicating <- function(grps) {
 
+  if (is.null(groups)) return(NULL)
+
   all_vars <- unlist(grps)
 
   if (length(all_vars) != length(unique(all_vars))) {
@@ -14,6 +16,8 @@ check_non_duplicating <- function(grps) {
 
 check_consecutive <- function(grps, check_order) {
 
+  if (is.null(groups)) return(NULL)
+
   flag <- FALSE
 
   # Extract all lists from current level
@@ -25,6 +29,9 @@ check_consecutive <- function(grps, check_order) {
 
     # Now ensure that, for each nested list, groups are consecutive in the order implied by groups
     for (i in 1:length(extracted)) {
+
+      # Ensure that each list has a name
+      if (is.null(names(extracted[i]))) stop("Please ensure that each list in groups has a name.")
 
       sub_extract <- extracted[[i]]
 
