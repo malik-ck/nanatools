@@ -303,7 +303,6 @@ get_table1 <- function(data, treatment_name = NULL, sig_figs = 2, labels = NULL,
   if (is.null(summarize_binary)) style_binary <- summarize_binary <- 0
 
 
-
   styles_attached <- rbind(
     cbind(style_mean, summarize_mean),
     cbind(style_median, summarize_median),
@@ -341,20 +340,75 @@ get_table1 <- function(data, treatment_name = NULL, sig_figs = 2, labels = NULL,
   all_table_lists <- lapply(tx_indeces, create_formatted_list, data = data,
                             styles_attached = styles_attached)
 
+  # Do some weird iteration over grouping structure here...
+  all_elements <- list()
+  get_current_lvl <- unlist(make_index_list, recursive = FALSE)
+  current_depth <- 1
 
-  if (length(all_group_indices) != 0) {
+  while (TRUE) {
 
-    for (i in 1:length(all_group_indices)) {
+    get_non_lists <- get_current_lvl[which(unlist(lapply(get_current_lvl, function(x) !is.list(x))))]
 
-      for (n in 1:length(all_table_lists[[i]])) {
+    for (i in 1:length(get_non_lists)) {
 
-        if (n %in% unlist(all_group_indices)) {
+      all_elements <- append(all_elements, list(list(depth = current_depth, index = get_non_lists[[i]])))
 
-          all_table_lists[[i]][[n]][,1] <- paste0("    ", all_table_lists[[i]][[n]][,1])
+    }
 
-        }
+    # Discard all non-lists now and unlist further
+    get_lists <- get_current_lvl[which(unlist(lapply(get_current_lvl, function(x) is.list(x))))]
 
-      }
+    if (length(get_lists) == 0) break
+
+    get_current_lvl <- unlist(get_lists, recursive = FALSE)
+
+    current_depth <- current_depth + 1
+
+  }
+
+  # Need to do something similar for names
+  temp_index_list <- make_index_list
+  min_indices <- list()
+  current_depth <- 0
+
+  while (TRUE) {
+
+    for (i in 1:length(temp_index_list)) {
+
+      min_indices <- append(min_indices, list(list(min_index = min(unlist(temp_index_list[[i]])), name = names(temp_index_list)[[i]], current_depth = current_depth)))
+
+    }
+
+    flattened <- unlist(temp_index_list, recursive = FALSE, use.names = FALSE)
+
+    names(flattened) <- unlist(lapply(temp_index_list, function(x) {
+      if (is.null(names(x))) rep("", length(x)) else names(x)
+    }))
+
+    temp_index_list <- flattened[which(unlist(lapply(flattened, is.list)))]
+
+    if (length(temp_index_list) == 0) break
+
+    current_depth <- current_depth + 1
+
+  }
+
+  # Get spacing and names where we need them in table lists
+  for (n in 1:length(all_table_lists)) {
+
+    for (i in 1:length(all_elements)) {
+
+      space_amount <- strrep("  ", all_elements[[i]]$depth)
+      all_table_lists[[n]][[all_elements[[i]]$index]][,1] <- paste0(space_amount, all_table_lists[[n]][[all_elements[[i]]$index]][,1])
+
+    }
+
+    for (i in length(min_indices):1) {
+
+      space_amount <- strrep("  ", min_indices[[i]]$current_depth)
+
+      all_table_lists[[1]][[min_indices[[i]]$min_index]] <- rbind(c(paste0(space_amount, min_indices[[i]]$name), ""),
+                                                                  all_table_lists[[1]][[min_indices[[i]]$min_index]])
 
     }
 
@@ -368,39 +422,10 @@ get_table1 <- function(data, treatment_name = NULL, sig_figs = 2, labels = NULL,
   )
 
 
-  # Insert group headers and increase spacing everywhere we actually have a group
 
-  ex_list <- all_table_lists[[1]]
-  all_nrows <- lapply(ex_list, nrow)
-  start_in_table <- cumsum(c(1, all_nrows[-length(all_nrows)]))
 
-  tt_group_list <- vector("list", length(all_group_indices))
+  updated_table <- unstructured_table
 
-  if (length(all_group_indices) != 0) {
-
-    for (i in 1:length(all_group_indices)) {
-
-      insert_before <- start_in_table[min(all_group_indices[[i]])]
-      tt_group_list[[i]] <- insert_before
-      names(tt_group_list)[[i]] <- names(all_group_indices[i])
-
-    }
-
-    insert_at <- sort(unlist(tt_group_list)) + seq(0, length(tt_group_list) - 1)
-
-    updated_table <- unstructured_table
-
-    for (i in 1:length(insert_at)) {
-
-      updated_table <- rbind(
-        updated_table[seq(1, insert_at[[i]] - 1),],
-        c(names(insert_at)[[i]], rep("", ncol(updated_table) - 1)),
-        updated_table[seq(insert_at[[i]], nrow(updated_table)),]
-      )
-
-    }
-
-  } else updated_table <- unstructured_table
 
   colnames(updated_table)[[1]] <- "Variable"
 
