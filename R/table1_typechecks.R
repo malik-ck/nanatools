@@ -2,7 +2,7 @@
 
 check_non_duplicating <- function(grps) {
 
-  if (is.null(groups)) return(NULL)
+  if (is.null(grps)) return(NULL)
 
   all_vars <- unlist(grps)
 
@@ -16,7 +16,7 @@ check_non_duplicating <- function(grps) {
 
 check_consecutive <- function(grps, check_order) {
 
-  if (is.null(groups)) return(NULL)
+  if (is.null(grps)) return(NULL)
 
   flag <- FALSE
 

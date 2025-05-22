@@ -1,7 +1,7 @@
 
 
 ### To do:
-# 1) Better grouping (nested groups!)
+# 1) Current handling of set_named_list_at_path horrible if a cat variable isn't already a group. Very important to fix!
 # 2) Custom missingness handling (complete case across data, complete case for one variable,
 # separate category with its own group)
 # 3) Guesses on what type of summary a variable receives
@@ -173,37 +173,83 @@ get_table1 <- function(data, treatment_name = NULL, sig_figs = 2, labels = NULL,
     )
 
     # Function to identify a path
-    find_path <- function(lst, target, path = list()) {
-      for (i in seq_along(lst)) {
-        new_path <- c(path, i)
-        item <- lst[[i]]
+    find_path <- function(lst, target) {
+      stack <- list(list(node = lst, path = list()))
 
-        if (is.list(item)) {
-          result <- find_path(item, target, new_path)
-          if (!is.null(result)) return(result)
-        } else {
-          if (identical(item, target)) return(new_path)
+      while (length(stack) > 0) {
+        current <- stack[[length(stack)]]
+        stack <- stack[-length(stack)]
+
+        node <- current$node
+        path <- current$path
+
+        if (!is.list(node)) next
+
+        for (i in seq_along(node)) {
+          item <- node[[i]]
+          new_path <- c(path, i)
+
+          if (is.list(item)) {
+            stack[[length(stack) + 1]] <- list(node = item, path = new_path)
+          } else {
+            if (identical(item, target)) {
+              return(new_path)
+            }
+          }
         }
       }
-      return(NULL)
+
+      return(NULL)  # Not found
     }
 
     # Function to overwrite with a named list at a path
     set_named_list_at_path <- function(lst, path, name, value_list) {
       stopifnot(is.list(value_list))
-      if (length(path) == 1) {
-        lst[[path[[1]]]] <- NULL  # Remove the old item
-        lst <- append(lst, setNames(list(value_list), name), after = path[[1]] - 1)
-      } else {
-        lst[[path[[1]]]] <- set_named_list_at_path(lst[[path[[1]]]], path[-1], name, value_list)
+
+      # Navigate to the parent of the target element
+      current <- lst
+      for (i in head(path, -1)) {
+        current <- current[[i]]
       }
+
+      idx <- tail(path, 1)
+      current[[idx]] <- NULL  # Remove old item
+      new_item <- setNames(list(value_list), name)
+
+      # Replace in the original list structure
+      parent <- lst
+      ptr <- parent
+      for (i in head(path, -1)) {
+        ptr <- ptr[[i]]
+      }
+      ptr <- append(ptr, new_item, after = idx - 1)
+
+      # Now reassign this modified sublist back up to the top
+      assign_recursive <- function(lst, path, sub) {
+        if (length(path) == 0) return(sub)
+        lst[[path[1]]] <- assign_recursive(lst[[path[1]]], path[-1], sub)
+        return(lst)
+      }
+
+      lst <- assign_recursive(lst, head(path, -1), ptr)
       return(lst)
     }
 
-    for (i in 1:length(get_cat_inds)) {
+    for (i in seq_along(get_cat_inds)) {
 
-      get_path <- find_path(make_index_list, get_cat_inds[[i]])
-      make_index_list <- set_named_list_at_path(make_index_list, get_path, labels[[get_cat_inds[[i]]]], list(get_cat_inds[[i]]))
+      path <- find_path(make_index_list, get_cat_inds[[i]])
+
+      if (is.null(path)) {
+
+        make_index_list <- append(make_index_list, list(list(get_cat_inds[[i]])))
+        names(make_index_list)[[length(make_index_list)]] <- table1_order[[get_cat_inds[[i]]]]
+
+
+      } else {
+
+        label <- labels[[get_cat_inds[[i]]]]
+        make_index_list <- set_named_list_at_path(make_index_list, path, label, list(get_cat_inds[[i]]))
+      }
 
     }
 
@@ -340,89 +386,101 @@ get_table1 <- function(data, treatment_name = NULL, sig_figs = 2, labels = NULL,
   all_table_lists <- lapply(tx_indeces, create_formatted_list, data = data,
                             styles_attached = styles_attached)
 
-  # Do some weird iteration over grouping structure here...
-  all_elements <- list()
-  get_current_lvl <- unlist(make_index_list, recursive = FALSE)
-  current_depth <- 1
+  if (length(make_index_list) > 0) {
 
-  while (TRUE) {
+    # Do some weird iteration over grouping structure here...
+    all_elements <- list()
+    get_current_lvl <- unlist(make_index_list, recursive = FALSE)
+    current_depth <- 1
 
-    get_non_lists <- get_current_lvl[which(unlist(lapply(get_current_lvl, function(x) !is.list(x))))]
+    while (TRUE) {
 
-    for (i in 1:length(get_non_lists)) {
+      get_non_lists <- get_current_lvl[which(unlist(lapply(get_current_lvl, function(x) !is.list(x))))]
 
-      all_elements <- append(all_elements, list(list(depth = current_depth, index = get_non_lists[[i]])))
+      for (i in 1:length(get_non_lists)) {
 
-    }
+        all_elements <- append(all_elements, list(list(depth = current_depth, index = get_non_lists[[i]])))
 
-    # Discard all non-lists now and unlist further
-    get_lists <- get_current_lvl[which(unlist(lapply(get_current_lvl, function(x) is.list(x))))]
+      }
 
-    if (length(get_lists) == 0) break
+      # Discard all non-lists now and unlist further
+      get_lists <- get_current_lvl[which(unlist(lapply(get_current_lvl, function(x) is.list(x))))]
 
-    get_current_lvl <- unlist(get_lists, recursive = FALSE)
+      if (length(get_lists) == 0) break
 
-    current_depth <- current_depth + 1
+      get_current_lvl <- unlist(get_lists, recursive = FALSE)
 
-  }
-
-  # Need to do something similar for names
-  temp_index_list <- make_index_list
-  min_indices <- list()
-  current_depth <- 0
-
-  while (TRUE) {
-
-    for (i in 1:length(temp_index_list)) {
-
-      min_indices <- append(min_indices, list(list(min_index = min(unlist(temp_index_list[[i]])), name = names(temp_index_list)[[i]], current_depth = current_depth)))
+      current_depth <- current_depth + 1
 
     }
 
-    flattened <- unlist(temp_index_list, recursive = FALSE, use.names = FALSE)
+    # Need to do something similar for names
+    temp_index_list <- make_index_list
+    min_indices <- list()
+    current_depth <- 0
 
-    names(flattened) <- unlist(lapply(temp_index_list, function(x) {
-      if (is.null(names(x))) rep("", length(x)) else names(x)
-    }))
+    while (TRUE) {
 
-    temp_index_list <- flattened[which(unlist(lapply(flattened, is.list)))]
+      if (length(make_index_list) == 0) break
 
-    if (length(temp_index_list) == 0) break
+      for (i in 1:length(temp_index_list)) {
 
-    current_depth <- current_depth + 1
+        min_indices <- append(min_indices, list(list(min_index = min(unlist(temp_index_list[[i]])), name = names(temp_index_list)[[i]], current_depth = current_depth)))
 
-  }
+      }
 
-  # Get spacing and names where we need them in table lists
-  for (n in 1:length(all_table_lists)) {
+      flattened <- unlist(temp_index_list, recursive = FALSE, use.names = FALSE)
 
-    for (i in 1:length(all_elements)) {
+      names(flattened) <- unlist(lapply(temp_index_list, function(x) {
+        if (is.null(names(x))) rep("", length(x)) else names(x)
+      }))
 
-      space_amount <- strrep("  ", all_elements[[i]]$depth)
-      all_table_lists[[n]][[all_elements[[i]]$index]][,1] <- paste0(space_amount, all_table_lists[[n]][[all_elements[[i]]$index]][,1])
+      temp_index_list <- flattened[which(unlist(lapply(flattened, is.list)))]
 
-    }
+      if (length(temp_index_list) == 0) break
 
-    for (i in length(min_indices):1) {
-
-      space_amount <- strrep("  ", min_indices[[i]]$current_depth)
-
-      all_table_lists[[1]][[min_indices[[i]]$min_index]] <- rbind(c(paste0(space_amount, min_indices[[i]]$name), ""),
-                                                                  all_table_lists[[1]][[min_indices[[i]]$min_index]])
+      current_depth <- current_depth + 1
 
     }
 
-  }
+    # Get spacing and names where we need them in table lists
+    for (n in 1:length(all_table_lists)) {
 
-  unstructured_table <- cbind(
-    do.call(rbind, all_table_lists[[1]])[,1],
-    do.call(cbind,
-            lapply(all_table_lists, function(x) do.call(rbind, x)[,2])
+      for (i in 1:length(all_elements)) {
+
+        space_amount <- strrep("  ", all_elements[[i]]$depth)
+        all_table_lists[[n]][[all_elements[[i]]$index]][,1] <- paste0(space_amount, all_table_lists[[n]][[all_elements[[i]]$index]][,1])
+
+      }
+
+      for (i in length(min_indices):1) {
+
+        space_amount <- strrep("  ", min_indices[[i]]$current_depth)
+
+        all_table_lists[[1]][[min_indices[[i]]$min_index]] <- rbind(c(paste0(space_amount, min_indices[[i]]$name), ""),
+                                                                    all_table_lists[[1]][[min_indices[[i]]$min_index]])
+
+      }
+
+    }
+
+    unstructured_table <- cbind(
+      do.call(rbind, all_table_lists[[1]])[,1],
+      do.call(cbind,
+              lapply(all_table_lists, function(x) do.call(rbind, x)[,2])
+      )
     )
-  )
 
+  } else {
 
+    unstructured_table <- cbind(
+      do.call(rbind, all_table_lists[[1]])[,1],
+      do.call(cbind,
+              lapply(all_table_lists, function(x) do.call(rbind, x)[,2])
+      )
+    )
 
+  }
 
   updated_table <- unstructured_table
 
@@ -519,7 +577,7 @@ get_missingness_table <- function(data, subset = "missing_only", treatment_name 
   # Quick if-else to get subsets of the data, if desired
   if (identical(subset, "missing_only")) {
 
-    get_subset <- unique(c(names(which(lapply(lapply(df, is.na), sum) > 0)),
+    get_subset <- unique(c(names(which(lapply(lapply(data, is.na), sum) > 0)),
                            treatment_name))
 
   } else if (is.null(subset)) {
@@ -580,7 +638,7 @@ get_missingness_table <- function(data, subset = "missing_only", treatment_name 
   # Can now apply the function
   miss_tab <- get_table1(data = na_df, treatment_name, sig_figs, labels, order,
                          summarize_binary = summarize_binary, include_overall = include_overall,
-                         groups = NULL)
+                         summarize_categorical = NULL, groups = NULL)
 
   return(miss_tab)
 
