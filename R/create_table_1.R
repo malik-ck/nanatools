@@ -399,13 +399,17 @@ get_table1 <- function(data, treatment_name = NULL, sig_figs = 2, labels = NULL,
 
       temp_inds_1 <- unlist(lapply(get_current_lvl, function(x) !is.list(x)))
 
-      get_non_lists <- get_current_lvl[which(temp_inds_1)]
+      if (length(temp_inds_1) > 0) {
 
-      for (i in 1:length(get_non_lists)) {
+        get_non_lists <- get_current_lvl[which(temp_inds_1)]
 
-        all_elements <- append(all_elements, list(list(depth = current_depth, index = get_non_lists[[i]])))
+        for (i in 1:length(get_non_lists)) {
 
-      }
+          all_elements <- append(all_elements, list(list(depth = current_depth, index = get_non_lists[[i]])))
+
+        }
+
+      } else get_non_lists <- list()
 
       # Discard all non-lists now and unlist further
       temp_inds_2 <- unlist(lapply(get_current_lvl, function(x) is.list(x)))
