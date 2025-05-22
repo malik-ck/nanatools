@@ -397,7 +397,9 @@ get_table1 <- function(data, treatment_name = NULL, sig_figs = 2, labels = NULL,
 
     while (TRUE) {
 
-      get_non_lists <- get_current_lvl[which(unlist(lapply(get_current_lvl, function(x) !is.list(x))))]
+      temp_inds_1 <- unlist(lapply(get_current_lvl, function(x) !is.list(x)))
+
+      get_non_lists <- get_current_lvl[which(temp_inds_1)]
 
       for (i in 1:length(get_non_lists)) {
 
@@ -406,9 +408,11 @@ get_table1 <- function(data, treatment_name = NULL, sig_figs = 2, labels = NULL,
       }
 
       # Discard all non-lists now and unlist further
-      get_lists <- get_current_lvl[which(unlist(lapply(get_current_lvl, function(x) is.list(x))))]
+      temp_inds_2 <- unlist(lapply(get_current_lvl, function(x) is.list(x)))
 
-      if (length(get_lists) == 0) break
+      if (length(temp_inds_2) == 0) break
+
+      get_lists <- get_current_lvl[which(temp_inds_2)]
 
       get_current_lvl <- unlist(get_lists, recursive = FALSE)
 
