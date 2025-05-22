@@ -149,6 +149,8 @@ get_table1 <- function(data, treatment_name = NULL, sig_figs = 2, labels = NULL,
   # Also add single groups for categorical variables here
   replace_names_by_inds <- function(grps, varnames) {
 
+    if (is.null(grps)) return(list())
+
     lapply(
       grps, function(x) {
         if (is.list(x)) {
