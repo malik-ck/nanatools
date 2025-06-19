@@ -45,11 +45,11 @@ predict.LazySL <- function(object, newdata = NULL, metalearner_name = NULL, outp
 
     }
 
-    if (is.null(newdata)) newdata <- object$data
+    if (is.null(newdata)) newdata <- object$x
 
     # If someone provided new data, ensure that its number of columns matches
     # that of the original data set
-    if (ncol(object$data) != ncol(newdata)) {
+    if (ncol(object$x) != ncol(newdata)) {
 
       stop("Please ensure that newdata has the same number of columns as training data.")
 
@@ -138,8 +138,8 @@ predict.LazySL <- function(object, newdata = NULL, metalearner_name = NULL, outp
 
     }
 
-    # Set newdata to be saved data if newdata is NULL
-    if (is.null(newdata)) newdata <- object$data
+    # Set newdata to be saved x if newdata is NULL
+    if (is.null(newdata)) newdata <- object$x
 
     # Do some checks
     if (object$was_cv_ensemble == FALSE & output_best == TRUE) {
@@ -289,7 +289,7 @@ loss.LazySL <- function(object, newdata = NULL, ensemble_fold_id = NULL, type = 
 #' @export
 marginals.LazySL <- function(obj, subset = NULL, metalearner_name, type = "ensemble", h = NULL) {
 
-  data <- obj$data
+  data <- obj$x
 
   if (is.null(subset)) subset <- colnames(data) else subset <- subset
 

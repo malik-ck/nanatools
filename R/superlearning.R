@@ -463,18 +463,18 @@ learner_setup <- function(learner_list, inner_cv = 5, outer_cv = 5, loss = "gaus
 
 # Train ensemble nuisance
 
-train_ensemble_nuisance <- function(y, data, cv_list, metalearners, learner_list, loss_fun_list, w_tol) {
+train_ensemble_nuisance <- function(x, y, cv_list, metalearners, learner_list, loss_fun_list, w_tol) {
 
   ### Fit to all existing nested folds
 
   # Define a function that provides predictions
-  fit_across_folds <- function(y, data, learner, folds) {
+  fit_across_folds <- function(x, y, learner, folds) {
 
     # Save order of unlisted validation sets
     valid_order <- order(unlist(lapply(folds, function(x) x$validation_set)))
 
     all_preds <- lapply(folds,
-                        function(x) learner$preds(object = learner$fit(data = data[x$training_set,]), data = data[x$validation_set,])
+                        function(fld) learner$preds(object = learner$fit(x = x[fld$training_set,], y = y[fld$training_set]), data = x[fld$validation_set,])
     )
 
     # Get predictions into the correct order
@@ -484,11 +484,11 @@ train_ensemble_nuisance <- function(y, data, cv_list, metalearners, learner_list
 
   # Use function across all sets of fit and prediction function couplings
   # Then save as data frame with requested learner names
-  preds_list <- lapply(learner_list, fit_across_folds, y = y, folds = cv_list, data = data)
+  preds_list <- lapply(learner_list, fit_across_folds, y = y, folds = cv_list, x = x)
   names(preds_list) <- lapply(learner_list, function(x) x$name)
 
   # Apply metalearners to prediction df iteratively
-  wt_list <- lapply(metalearners, function(x) x(y = y[sort(unlist(cv_list[[1]]))], preds_list = preds_list, loss_fun_list = loss_fun_list))
+  wt_list <- lapply(metalearners, function(mtl) mtl(y = y[sort(unlist(cv_list[[1]]))], preds_list = preds_list, loss_fun_list = loss_fun_list))
 
   # Then, round according to weight tolerance and rescale
   rounded_wt_list <- lapply(wt_list, function(x) ifelse(abs(x) < w_tol, 0, x) / sum(ifelse(abs(x) < w_tol, 0, x)))
@@ -501,7 +501,7 @@ train_ensemble_nuisance <- function(y, data, cv_list, metalearners, learner_list
 
 
 # Function for training models after generating ensembles
-fit_ensemble <- function(y, data, cv_list, learner_list, future_pkgs) {
+fit_ensemble <- function(x, y, cv_list, learner_list, future_pkgs) {
 
   # Ensure that training happens on all data if no ensemble CV happens
   if (is.null(cv_list)) {
@@ -512,16 +512,16 @@ fit_ensemble <- function(y, data, cv_list, learner_list, future_pkgs) {
 
   # Train across performance sets
   # First, define a function training all learners on a data set
-  fit_all_learns <- function(learner_list, data) {
+  fit_all_learns <- function(learner_list, x, y) {
 
-    lapply(learner_list, function(x) x$fit(data))
+    lapply(learner_list, function(lrns) lrns$fit(x, y))
 
   }
 
   # Then, apply learners to all training sets
   all_learned_list <- future_lapply(cv_list,
-                                    function(x) fit_all_learns(
-                                      learner_list = learner_list, data = data[x$training_set,]),
+                                    function(flds) fit_all_learns(
+                                      learner_list = learner_list, x = x[flds$training_set,], y = y[flds$training_set]),
                                     future.packages = future_pkgs, future.seed = TRUE
   )
 
@@ -529,10 +529,10 @@ fit_ensemble <- function(y, data, cv_list, learner_list, future_pkgs) {
 
 }
 
-get_losses_across_ensembles <- function(y, data, cv_list, learner_list, get_all_learners, get_all_ensembles, loss_fun) {
+get_losses_across_ensembles <- function(x, y, cv_list, learner_list, get_all_learners, get_all_ensembles, loss_fun) {
 
   # Get indices of validation sets on which you can calculate losses
-  val_sets <- lapply(cv_list, function(x) x$validation_set)
+  val_sets <- lapply(cv_list, function(flds) flds$validation_set)
 
   # Apply all ensembles to all validation sets
   calc_one_ensemble <- function(y_ss, val_set, learner_list, learner_subset, ensemble_subset, loss_fun) {
@@ -555,7 +555,7 @@ get_losses_across_ensembles <- function(y, data, cv_list, learner_list, get_all_
 
   for (i in 1:length(val_sets)) {
 
-    all_fold_losses[[i]] <- calc_one_ensemble(y[val_sets[[i]]], data[val_sets[[i]],], learner_list, get_all_learners[[i]], get_all_ensembles[[i]], loss_fun)
+    all_fold_losses[[i]] <- calc_one_ensemble(y[val_sets[[i]]], x[val_sets[[i]],], learner_list, get_all_learners[[i]], get_all_ensembles[[i]], loss_fun)
 
   }
 
@@ -582,20 +582,20 @@ get_losses_across_ensembles <- function(y, data, cv_list, learner_list, get_all_
 #'
 #' @examples
 #' data(iris)
-lazy_cv <- function(y, data, init) {
+lazy_cv <- function(x, y, init) {
 
   if(class(init) != "LazySL_Setup") stop("Please provide a LazySL_Setup object as initialization list.")
 
   # Check whether data is a data frame or a matrix
-  if (!is.matrix(data) & !is.data.frame(data)) {
+  if (!is.matrix(x) & !is.data.frame(x)) {
 
-    stop("Please provide either a data frame or a matrix for data.")
+    stop("Please provide either a data frame or a matrix for x")
 
   }
 
 
   # Now create CV folds to use later
-  init$cv <- create_cv_folds(data, init$inner_fold_creator, init$outer_fold_creator)
+  init$cv <- create_cv_folds(x, init$inner_fold_creator, init$outer_fold_creator)
 
 
   if (is.null(init$cv$build_sets)) {
@@ -619,8 +619,8 @@ lazy_cv <- function(y, data, init) {
     # First, train all ensembles iteratively
     get_all_ensembles <- future_lapply(init$cv$build_sets,
                                        train_ensemble_nuisance,
-                                       y = access_y(y, data),
-                                       data = data,
+                                       x = x,
+                                       y = y,
                                        learner_list = init$learner_list,
                                        metalearners = init$metalearners,
                                        loss_fun_list = init$loss_fun_list,
@@ -633,8 +633,8 @@ lazy_cv <- function(y, data, init) {
 
   # Then, get all learners trained on outer fold training sets
   get_all_learners <- fit_ensemble(
-    access_y(y, data),
-    data,
+    x,
+    y,
     init$cv$performance_sets,
     init$learner_list,
     init$future_pkgs
@@ -647,8 +647,8 @@ lazy_cv <- function(y, data, init) {
 
   # List with all that's needed...
   return_list <- list(
-    y = init$y,
-    data = data,
+    x = x,
+    y = y,
     learners = init$learner_list,
     metalearners = init$metalearners,
     metalearner_count = metalearner_count,
@@ -657,14 +657,13 @@ lazy_cv <- function(y, data, init) {
     config = init$config,
     ensembles = get_all_ensembles,
     fit_objects = get_all_learners,
-    was_cv_ensemble = ensemble_cv,
-    realized_y = access_y(y, data)
+    was_cv_ensemble = ensemble_cv
   )
 
   # If the ensemble is cross-validated, also provide the best-performing one
   if (ensemble_cv == TRUE & metalearner_count > 1) {
 
-    return_list$best_metalearner <- get_losses_across_ensembles(access_y(y, data), data, init$cv$performance_sets,
+    return_list$best_metalearner <- get_losses_across_ensembles(x, y, init$cv$performance_sets,
                                                                 init$learner_list, get_all_learners, get_all_ensembles,
                                                                 init$loss_fun_list$loss_fun)
 
