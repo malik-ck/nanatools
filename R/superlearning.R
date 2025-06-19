@@ -167,31 +167,6 @@ create_cv_folds <- function(data, inner_cv, outer_cv) {
 
 }
 
-
-access_y <- function(y, data) {
-
-  if (is.character(y) & length(y) == 1) {
-
-    acc_y <- data[,y]
-
-  } else if ((is.numeric(y) | is.factor(y) | is.character(y)) & length(y) > 1) {
-
-    acc_y <- y
-
-  } else if (is.function(y)) {
-
-    acc_y <- y(data)
-
-  } else {
-
-    stop("Please provide either an appropriate vector, a variable name, or an accessing function for y.")
-
-  }
-
-  return(acc_y)
-
-}
-
 get_lrn_packages <- function(learner_list, metalearners) {
 
   lrnr_pkg_list <- lapply(learner_list, function(x) {
@@ -444,7 +419,6 @@ learner_setup <- function(learner_list, inner_cv = 5, outer_cv = 5, loss = "gaus
   )
 
   # Create folds
-  # Also checks whether y can be accessed!
   all_cv_funs <- make_cv_funs(inner_cv, outer_cv)
 
   return_list$inner_fold_creator <- all_cv_funs$inner_cv
@@ -474,7 +448,7 @@ train_ensemble_nuisance <- function(x, y, cv_list, metalearners, learner_list, l
     valid_order <- order(unlist(lapply(folds, function(x) x$validation_set)))
 
     all_preds <- lapply(folds,
-                        function(fld) learner$preds(object = learner$fit(x = x[fld$training_set,], y = y[fld$training_set]), data = x[fld$validation_set,])
+                        function(fld) predict(object = fit(learner, x = x[fld$training_set,], y = y[fld$training_set]), newdata = x[fld$validation_set,])
     )
 
     # Get predictions into the correct order
@@ -514,7 +488,7 @@ fit_ensemble <- function(x, y, cv_list, learner_list, future_pkgs) {
   # First, define a function training all learners on a data set
   fit_all_learns <- function(learner_list, x, y) {
 
-    lapply(learner_list, function(lrns) lrns$fit(x, y))
+    lapply(learner_list, function(lrns) fit(lrns, x, y))
 
   }
 
@@ -529,18 +503,18 @@ fit_ensemble <- function(x, y, cv_list, learner_list, future_pkgs) {
 
 }
 
-get_losses_across_ensembles <- function(x, y, cv_list, learner_list, get_all_learners, get_all_ensembles, loss_fun) {
+get_losses_across_ensembles <- function(x, y, cv_list, get_all_learners, get_all_ensembles, loss_fun) {
 
   # Get indices of validation sets on which you can calculate losses
   val_sets <- lapply(cv_list, function(flds) flds$validation_set)
 
   # Apply all ensembles to all validation sets
-  calc_one_ensemble <- function(y_ss, val_set, learner_list, learner_subset, ensemble_subset, loss_fun) {
+  calc_one_ensemble <- function(y_ss, val_set, learner_subset, ensemble_subset, loss_fun) {
 
 
     # Get all predictions first
-    all_preds <- vector("list", length(learner_list))
-    for (i in 1:length(all_preds)) all_preds[[i]] <- learner_list[[i]]$preds(learner_subset[[i]], val_set)
+    all_preds <- vector("list", length(learner_subset))
+    for (i in 1:length(all_preds)) all_preds[[i]] <- predict(learner_subset[[i]], newdata = val_set)
 
     # Now apply all ensembles to predictions
     pred_mat <- do.call("cbind", all_preds)
@@ -555,7 +529,7 @@ get_losses_across_ensembles <- function(x, y, cv_list, learner_list, get_all_lea
 
   for (i in 1:length(val_sets)) {
 
-    all_fold_losses[[i]] <- calc_one_ensemble(y[val_sets[[i]]], x[val_sets[[i]],], learner_list, get_all_learners[[i]], get_all_ensembles[[i]], loss_fun)
+    all_fold_losses[[i]] <- calc_one_ensemble(y[val_sets[[i]]], x[val_sets[[i]],], get_all_learners[[i]], get_all_ensembles[[i]], loss_fun)
 
   }
 

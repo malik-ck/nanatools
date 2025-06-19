@@ -4,14 +4,14 @@
 \alias{lazy_cv}
 \title{Title}
 \usage{
-lazy_cv(y, data, init)
+lazy_cv(x, y, init)
 }
 \arguments{
 \item{y}{Either the outcome variable itself, or a character string containing it.}
 
-\item{data}{A data.frame or matrix containing all data (both X and y).}
-
 \item{init}{An initialization object.}
+
+\item{data}{A data.frame or matrix containing all data (both X and y).}
 }
 \value{
 A list of class lazycv containing results of the superlearner.

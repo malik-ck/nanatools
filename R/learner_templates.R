@@ -1,4 +1,48 @@
 
+
+# fit() and predict() generics for individual learners
+
+#' @export
+fit <- function(object, ...) {
+  UseMethod("fit")
+}
+
+#' @export
+fit.SL_Learner <- function(object, x, y, ...) {
+  copy_structure <- object
+  copy_structure$model <- object$fit(x, y)
+  class(copy_structure) <- c("SL_Learner_Fitted", "SL_Learner")
+  return(copy_structure)
+}
+
+#' @export
+predict.SL_Learner <- function(object, newdata, ...) {
+
+  stop("Please train this learner before using it for predictions.")
+
+}
+
+#' @export
+predict.SL_Learner_Fitted <- function(object, newdata, ...) {
+
+  object$preds(object$model, newdata)
+}
+
+# Also printing!
+#' @export
+print.SL_Learner <- function(object, ...) {
+
+  message(cat("Learner object with name", object$name, ".\nNot yet fitted."))
+
+}
+
+#' @export
+print.SL_Learner_Fitted <- function(object, ...) {
+
+  message(cat("Learner object with name", object$name, ".\nHas been fitted."))
+}
+
+
 # Write a constructor for valid learner objects
 # Still big work in progress
 lrn_custom <- function(name, fit, preds) {

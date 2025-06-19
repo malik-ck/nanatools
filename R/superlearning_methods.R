@@ -76,14 +76,14 @@ predict.LazySL <- function(object, newdata = NULL, metalearner_name = NULL, outp
     }
 
     # Write a function that predicts for one set of folds
-    predict_one_fold <- function(learners, ensemble, weights, validation_set, newdata = NULL) {
+    predict_one_fold <- function(ensemble, weights, validation_set, newdata = NULL) {
 
       preds_vec <- rep(0, length(validation_set))
 
-      for (i in 1:length(learners)) {
+      for (i in 1:length(ensemble)) {
 
-        current_preds <- learners[[i]]$preds(ensemble[[i]], newdata)
-        current_weight <- weights[learners[[i]]$name]
+        current_preds <- predict(ensemble[[i]], newdata = newdata)
+        current_weight <- weights[ensemble[[i]]$name]
 
         preds_vec <- preds_vec + current_preds*current_weight
 
@@ -107,7 +107,7 @@ predict.LazySL <- function(object, newdata = NULL, metalearner_name = NULL, outp
       weight_subset <- object$ensembles[[i]][names(object$ensembles[[i]]) %in% metalearner_name]
 
 
-      pred_list[[i]] <- lapply(weight_subset, predict_one_fold, learners = object$learners,
+      pred_list[[i]] <- lapply(weight_subset, predict_one_fold,
                                ensemble = object$fit_objects[[i]], validation_set = current_validation_set,
                                newdata = newdata[current_validation_set,])
 
@@ -193,14 +193,14 @@ predict.LazySL <- function(object, newdata = NULL, metalearner_name = NULL, outp
 
     # Now do some predicting...
 
-    pred_engine <- function(metalearner_name, newdata, object, ensemble_fold_id) {
+    pred_engine <- function(metalearner_name, newdata, list_obj, ensemble_fold_id) {
 
       preds_vec <- rep(0, nrow(newdata))
 
-      for (i in 1:length(object$learners)) {
+      for (i in 1:length(list_obj$learners)) {
 
-        current_preds <- object$learners[[i]]$preds(object$fit_objects[[ensemble_fold_id]][[i]], newdata)
-        current_weight <- object$ensembles[[ensemble_fold_id]][[metalearner_name]][object$learners[[i]]$name]
+        current_preds <- predict(list_obj$fit_objects[[ensemble_fold_id]][[i]], newdata)
+        current_weight <- list_obj$ensembles[[ensemble_fold_id]][[metalearner_name]][list_obj$learners[[i]]$name]
 
         preds_vec <- preds_vec + current_preds*current_weight
 
@@ -212,7 +212,7 @@ predict.LazySL <- function(object, newdata = NULL, metalearner_name = NULL, outp
 
     }
 
-    return_list <- lapply(metalearner_name, function(x) pred_engine(metalearner_name = x, newdata = newdata, object = object, ensemble_fold_id = ensemble_fold_id))
+    return_list <- lapply(metalearner_name, function(x) pred_engine(metalearner_name = x, newdata = newdata, list_obj = object, ensemble_fold_id = ensemble_fold_id))
 
     if(length(return_list) == 1) return_list <- unlist(return_list) else names(return_list) <- metalearner_name
 
