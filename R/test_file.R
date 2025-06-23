@@ -7,11 +7,11 @@ quick_sim <- function() {
   # Schnell simulierte Daten...
   test_params <- c(0.5, rnorm(19, 0.1, 0.3))
   test_params_tx <- rnorm(19, -0.1, 0.25)
-  treatment_and_confounders <- mvrnorm(1000, rep(0, 20), randcorr(20))
+  treatment_and_confounders <- mvrnorm(200, rep(0, 20), randcorr(20))
   treatment_and_confounders[,1] <- rbinom(nrow(treatment_and_confounders), 1, plogis(0.2 + (treatment_and_confounders[,2:20] %*% test_params_tx)))
   confounders <- treatment_and_confounders[,-1]
   treatment <- treatment_and_confounders[,1]
-  outcome <- rnorm(1000, -0.3 + treatment_and_confounders %*% test_params, 1)
+  outcome <- rnorm(200, -0.3 + treatment_and_confounders %*% test_params, 1)
   colnames(treatment_and_confounders) <- LETTERS[1:20]
 
   # So kriegt man eine Liste an Learnern. Ich implementiere gleich noch einige (Custom ist auch sehr einfach).
@@ -38,7 +38,7 @@ quick_sim <- function() {
 
 }
 
-test <- replicate(1000, quick_sim())
+test <- replicate(2000, quick_sim())
 
 
 data(airquality)
