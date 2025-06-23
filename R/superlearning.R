@@ -184,7 +184,7 @@ get_lrn_packages <- function(learner_list, metalearners) {
 
   pkgs_only <- unlist(c(lrnr_pkg_list, metalearn_pkgs))[substr(unlist(c(lrnr_pkg_list, metalearn_pkgs)), 1, 8) == "package:"]
 
-  pkg_vec <- substr(pkgs_only, 9, 100)
+  pkg_vec <- unique(c(substr(pkgs_only, 9, 100), "nanatools"))
 
   return(pkg_vec)
 
@@ -450,7 +450,7 @@ train_ensemble_nuisance <- function(x, y, cv_list, metalearners, learner_list, l
     valid_order <- order(unlist(lapply(folds, function(x) x$validation_set)))
 
     all_preds <- lapply(folds,
-                        function(fld) predict(object = fit(learner, x = x[fld$training_set,], y = y[fld$training_set]), newdata = x[fld$validation_set,])
+                        function(fld) predict(object = nanatools::fit(learner, x = x[fld$training_set,], y = y[fld$training_set]), newdata = x[fld$validation_set,])
     )
 
     # Get predictions into the correct order
@@ -490,7 +490,7 @@ fit_ensemble <- function(x, y, cv_list, learner_list, future_pkgs) {
   # First, define a function training all learners on a data set
   fit_all_learns <- function(learner_list, x, y) {
 
-    lapply(learner_list, function(lrns) fit(lrns, x, y))
+    lapply(learner_list, function(lrns) nanatools::fit(lrns, x, y))
 
   }
 

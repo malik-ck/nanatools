@@ -45,6 +45,7 @@ print.SL_Learner_Fitted <- function(object, ...) {
 
 # Write a constructor for valid learner objects
 # Still big work in progress
+#' @export
 lrn_custom <- function(name, fit, preds) {
 
   get_list <- list(
@@ -60,6 +61,7 @@ lrn_custom <- function(name, fit, preds) {
 }
 
 # Template for empirical mean
+#' @export
 lrn_mean <- function(name) {
 
   force(name)
@@ -77,6 +79,7 @@ lrn_mean <- function(name) {
 }
 
 # Template for GLM
+#' @export
 lrn_glm <- function(name, family) {
 
   if (missing(family)) stop("Please explicitly specify a family object for glm.")
@@ -106,3 +109,33 @@ lrn_glm <- function(name, family) {
 
 }
 
+
+# Templates for GAMs
+lrn_glmnet <- function(name, family) {
+
+  if (missing(family)) stop("Please explicitly specify a family object for glm.")
+
+  force(name)
+  force(family)
+
+  get_list <- list(
+    name = name,
+    fit = function(x, y) {
+
+      fd <- data.frame(y = y, x)
+      glm(y ~ ., family = family, data = fd)
+
+    },
+    preds = function(object, data) {
+
+      if (!is.data.frame(data)) data <- data.frame(data)
+      predict(object, newdata = data, type = "response")
+
+    }
+  )
+
+  class(get_list) <- "SL_Learner"
+
+  return(get_list)
+
+}
