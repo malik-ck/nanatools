@@ -32,14 +32,14 @@ predict.SL_Learner_Fitted <- function(object, newdata, ...) {
 #' @export
 print.SL_Learner <- function(object, ...) {
 
-  message(cat("Learner object with name", object$name, ".\nNot yet fitted."))
+  message(cat("Learner object with name ", object$name, ".\nNot yet fitted.", sep = ""))
 
 }
 
 #' @export
 print.SL_Learner_Fitted <- function(object, ...) {
 
-  message(cat("Learner object with name", object$name, ".\nHas been fitted."))
+  message(cat("Learner object with name ", object$name, ".\nHas been fitted.", sep = ""))
 }
 
 
@@ -78,6 +78,8 @@ lrn_mean <- function(name) {
 
 # Template for GLM
 lrn_glm <- function(name, family) {
+
+  if (missing(family)) stop("Please explicitly specify a family object for glm.")
 
   force(name)
   force(family)

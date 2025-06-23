@@ -69,7 +69,7 @@ predict.LazySL <- function(object, newdata = NULL, metalearner_name = NULL, outp
     } else if (is.null(metalearner_name) & output_best == FALSE) {
 
       warning("No metalearner specified. Output is provided for all metalearners.
-            If you instead want predictions from the best metalearner only, set output_best to TRUE.")
+            If you instead want predictions from the best metalearner only and have a cross-validated ensemble, set output_best to TRUE.")
 
       metalearner_name <- names(object$metalearners)
 
@@ -170,7 +170,7 @@ predict.LazySL <- function(object, newdata = NULL, metalearner_name = NULL, outp
         if (output_best == FALSE) {
 
           warning("No metalearner specified. Output is provided for all of them.
-              If you instead want predictions from the best metalearner only, set output_best to TRUE.")
+              If you instead want predictions from the best metalearner only and have a cross-validated ensemble, set output_best to TRUE.")
 
           metalearner_name <- names(object$metalearners)
 
@@ -320,3 +320,20 @@ marginals.LazySL <- function(obj, subset = NULL, metalearner_name, type = "ensem
 
 }
 
+
+#' @export
+print.LazySL <- function(object) {
+
+  if (object$was_cv_ensemble == TRUE) {
+    has_cv_word <- paste0("Has been cross-validated across ", length(object$cv$performance_sets), " folds.")
+  } else has_cv_word <- "Has not been cross-validated."
+
+  cat("A superlearning object with:\n\n")
+
+  cat(length(object$learners), "learner(s)\n")
+
+  cat(length(object$metalearners), "ensemble(s)\n\n")
+
+  cat(has_cv_word)
+
+}

@@ -16,6 +16,8 @@
 
 # Depend on origami for fold specification
 
+### When predicting with cv, should ensure original and new data have same number of rows
+
 make_cv_funs <- function(inner_cv, outer_cv) {
 
   # Check type for CV
@@ -638,7 +640,7 @@ lazy_cv <- function(x, y, init) {
   if (ensemble_cv == TRUE & metalearner_count > 1) {
 
     return_list$best_metalearner <- get_losses_across_ensembles(x, y, init$cv$performance_sets,
-                                                                init$learner_list, get_all_learners, get_all_ensembles,
+                                                                get_all_learners, get_all_ensembles,
                                                                 init$loss_fun_list$loss_fun)
 
   } else if (ensemble_cv == TRUE) return_list$best_metalearner <- names(init$metalearners)
