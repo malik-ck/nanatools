@@ -111,27 +111,72 @@ lrn_glm <- function(name, family) {
 
 
 # Templates for GAMs
-lrn_glmnet <- function(name, family) {
+#' @export
+#' @import mgcv
+lrn_gam <- function(name, family, k = 10, method = "GCV.Cp", formula = NULL, smoother = "tp") {
 
   if (missing(family)) stop("Please explicitly specify a family object for glm.")
 
+  # Force evaluation of things to ensure they are available later...
   force(name)
+  force(formula)
   force(family)
+  force(method)
+  force(smoother)
+
+  fit <- function(x, y) {
+
+    # Need a data frame for GAMs
+    fd <- data.frame(y = y, x)
+
+    # Now need to construct formula
+    # If provided, just use provided formula
+    if (!is.null(formula)) {
+
+      use_frm <- formula
+
+    } else {
+
+      # Get numeric columns with sufficient length
+      filter_numeric <- which(unlist(lapply(fd[,-1], function(x) is.numeric(x) & length(unique(x)) > 2)))
+
+      # For those of sufficient length, get the number of unique values (capped at k)
+      unique_vals <- unlist(lapply(fd[,(filter_numeric + 1)], function(x) ifelse(length(unique(x)) <= k, length(unique(x)), k)))
+
+      # Now can construct formula
+      numeric_part <- paste0(
+        "s(", colnames(fd[,(filter_numeric + 1)]), ", k = ", unique_vals, ", bs = \"", smoother, "\") + ",
+        collapse = ""
+      )
+
+      indicator_part <- paste0(
+        colnames(fd[,-c(1, filter_numeric + 1)]), " + ", collapse = ""
+      )
+
+      # Combine all and remove last two of string (since that is an overhang +)
+      use_frm <- paste("y ~ ", numeric_part, indicator_part, collapse = "")
+      use_frm <- formula(substr(use_frm, 1, nchar(use_frm) - 3))
+
+    }
+
+    # Can now fit!
+    return(
+      mgcv::gam(use_frm, family = family, data = fd, method = method)
+    )
+
+  }
+
+  preds <- function(object, data) {
+
+    if (!is.data.frame(data)) data <- data.frame(data)
+    predict(object, newdata = data, type = "response")
+
+  }
 
   get_list <- list(
     name = name,
-    fit = function(x, y) {
-
-      fd <- data.frame(y = y, x)
-      glm(y ~ ., family = family, data = fd)
-
-    },
-    preds = function(object, data) {
-
-      if (!is.data.frame(data)) data <- data.frame(data)
-      predict(object, newdata = data, type = "response")
-
-    }
+    fit = fit,
+    preds = preds
   )
 
   class(get_list) <- "SL_Learner"
