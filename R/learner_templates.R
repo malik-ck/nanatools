@@ -184,3 +184,79 @@ lrn_gam <- function(name, family, k = 10, method = "GCV.Cp", formula = NULL, smo
   return(get_list)
 
 }
+
+
+# Templates for mboost
+#' @export
+#' @import mboost
+lrn_mboost <- function(name, family, mstop = 100, nu = 0.1, formula = NULL, lambda = 0.01, knots = 20) {
+
+  if (missing(family)) stop("Please explicitly specify a family object for glm.")
+
+  # Force evaluation of things to ensure they are available later...
+  force(name)
+  force(family)
+  force(formula)
+  force(lambda)
+  force(knots)
+
+  fit <- function(x, y) {
+
+    # Need a data frame for GAMs
+    fd <- data.frame(y = y, intr = 1, x)
+
+    # Now need to construct formula
+    # If provided, just use provided formula
+    if (!is.null(formula)) {
+
+      use_frm <- formula
+
+    } else {
+
+      # Get numeric columns with sufficient length
+      filter_numeric <- which(unlist(lapply(fd[,-1], function(x) is.numeric(x) & length(unique(x)) > 2)))
+
+      # For those of sufficient length, get the number of unique values (capped at k)
+      unique_vals <- unlist(lapply(fd[,(filter_numeric + 1)], function(x) ifelse(length(unique(x)) <= knots + 2, length(unique(x)), knots + 2)))
+
+      # Now can construct formula
+      numeric_part <- paste0(
+        "bbs(", colnames(fd[,(filter_numeric + 1)]), ", knots = ", unique_vals - 2, ", center = TRUE, lambda = ", lambda, ") + ",
+        collapse = ""
+      )
+
+      indicator_part <- paste0(
+        "bols(", colnames(fd[,-1]), ", intercept = FALSE, lambda = ", lambda, ") + ", collapse = ""
+      )
+
+      # Combine all and remove last two of string (since that is an overhang +)
+      use_frm <- paste("y ~ ", numeric_part, indicator_part, collapse = "")
+      use_frm <- formula(substr(use_frm, 1, nchar(use_frm) - 3))
+
+    }
+
+    # Can now fit!
+    return(
+      mboost::mboost(use_frm, data = fd, family = family, control = boost_control(mstop = mstop, nu = nu))
+    )
+
+  }
+
+  preds <- function(object, data) {
+
+    if (!is.data.frame(data)) data <- data.frame(data)
+    predict(object, newdata = data, type = "response")
+
+  }
+
+  get_list <- list(
+    name = name,
+    fit = fit,
+    preds = preds
+  )
+
+  class(get_list) <- "SL_Learner"
+
+  return(get_list)
+
+}
