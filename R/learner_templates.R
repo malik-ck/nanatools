@@ -189,7 +189,7 @@ lrn_gam <- function(name, family, k = 10, method = "GCV.Cp", formula = NULL, smo
 # Templates for mboost
 #' @export
 #' @import mboost
-lrn_mboost <- function(name, family, mstop = 100, nu = 0.1, formula = NULL, lambda = 0.01, knots = 20) {
+lrn_mboost <- function(name, family, mstop = 100, nu = 0.1, formula = NULL, max_df = 5, knots = 20, df_factor = 0.99) {
 
   if (missing(family)) stop("Please explicitly specify a family object for glm.")
 
@@ -197,7 +197,10 @@ lrn_mboost <- function(name, family, mstop = 100, nu = 0.1, formula = NULL, lamb
   force(name)
   force(family)
   force(formula)
-  force(lambda)
+  force(mstop)
+  force(nu)
+  force(max_df)
+  force(df_factor)
   force(knots)
 
   fit <- function(x, y) {
@@ -217,16 +220,17 @@ lrn_mboost <- function(name, family, mstop = 100, nu = 0.1, formula = NULL, lamb
       filter_numeric <- which(unlist(lapply(fd[,-1], function(x) is.numeric(x) & length(unique(x)) > 2)))
 
       # For those of sufficient length, get the number of unique values (capped at k)
-      unique_vals <- unlist(lapply(fd[,(filter_numeric + 1)], function(x) ifelse(length(unique(x)) <= knots + 2, length(unique(x)), knots + 2)))
+      get_n_knot <- unlist(lapply(fd[,(filter_numeric + 1)], function(x) ifelse(length(unique(x)) <= knots + 2, length(unique(x)), knots + 2)))
+      get_df <- unlist(lapply(fd[,(filter_numeric + 1)], function(x) ifelse(length(unique(x)) <= max_df, length(unique(x)) - 1, max_df)))
 
       # Now can construct formula
       numeric_part <- paste0(
-        "bbs(", colnames(fd[,(filter_numeric + 1)]), ", knots = ", unique_vals - 2, ", center = TRUE, lambda = ", lambda, ") + ",
+        "bbs(", colnames(fd[,(filter_numeric + 1)]), ", df = ", get_df * df_factor, ", center = TRUE, knots = ", get_n_knot, ") + ",
         collapse = ""
       )
 
       indicator_part <- paste0(
-        "bols(", colnames(fd[,-1]), ", intercept = FALSE, lambda = ", lambda, ") + ", collapse = ""
+        "bols(", colnames(fd[,-1]), ", intercept = FALSE, lambda = ", df_factor, ") + ", collapse = ""
       )
 
       # Combine all and remove last two of string (since that is an overhang +)
