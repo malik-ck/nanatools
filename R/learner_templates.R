@@ -230,7 +230,7 @@ lrn_mboost <- function(name, family, mstop = 100, nu = 0.1, formula = NULL, max_
       )
 
       indicator_part <- paste0(
-        "bols(", colnames(fd[,-1]), ", intercept = FALSE, lambda = ", df_factor, ") + ", collapse = ""
+        "bols(", colnames(fd[,-1]), ", intercept = FALSE, df = ", df_factor, ") + ", collapse = ""
       )
 
       # Combine all and remove last two of string (since that is an overhang +)
