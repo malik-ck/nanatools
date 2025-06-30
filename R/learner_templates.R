@@ -91,14 +91,35 @@ lrn_glm <- function(name, family) {
     name = name,
     fit = function(x, y) {
 
+      if (is.data.frame(x)) {
+        instr_list <- create_instruction_list(x)
+        x <- make_safe_matrix(x, instr_list)
+      } else {
+        instr_list <- "skip"
+      }
+
       fd <- data.frame(y = y, x)
-      glm(y ~ ., family = family, data = fd)
+      get_model <- glm(y ~ ., family = family, data = fd)
+
+      # Return explicitly with instruction list if needed
+      return(list(
+        model = get_model,
+        instructions = instr_list
+      ))
 
     },
     preds = function(object, data) {
 
-      if (!is.data.frame(data)) data <- data.frame(data)
-      predict(object, newdata = data, type = "response")
+      # Apply instruction list if necessary
+      if (!identical(object[["instructions"]], "skip")) {
+        data <- make_safe_matrix(data, object[["instructions"]])
+      }
+
+      # Then need to coerce to data frame either way
+      data <- data.frame(data)
+
+      # Then output
+      predict(object[["model"]], newdata = data, type = "response")
 
     }
   )
@@ -113,7 +134,7 @@ lrn_glm <- function(name, family) {
 # Templates for GAMs
 #' @export
 #' @import mgcv
-lrn_gam <- function(name, family, k = 10, method = "GCV.Cp", formula = NULL, smoother = "tp") {
+lrn_gam <- function(name, family, k = 10, method = "GCV.Cp", frm = NULL, smoother = "tp") {
 
   if (missing(family)) stop("Please explicitly specify a family object for glm.")
 
@@ -126,14 +147,22 @@ lrn_gam <- function(name, family, k = 10, method = "GCV.Cp", formula = NULL, smo
 
   fit <- function(x, y) {
 
+    # Make a safe matrix if necessary and no formula provided
+    if (is.data.frame(x) & is.null(frm)) {
+      instr_list <- create_instruction_list(x)
+      x <- make_safe_matrix(x, instr_list)
+    } else {
+      instr_list <- "skip"
+    }
+
     # Need a data frame for GAMs
     fd <- data.frame(y = y, x)
 
     # Now need to construct formula
     # If provided, just use provided formula
-    if (!is.null(formula)) {
+    if (!is.null(frm)) {
 
-      use_frm <- formula
+      use_frm <- frm
 
     } else {
 
@@ -141,11 +170,11 @@ lrn_gam <- function(name, family, k = 10, method = "GCV.Cp", formula = NULL, smo
       filter_numeric <- which(unlist(lapply(fd[,-1], function(x) is.numeric(x) & length(unique(x)) > 2)))
 
       # For those of sufficient length, get the number of unique values (capped at k)
-      unique_vals <- unlist(lapply(fd[,(filter_numeric + 1)], function(x) ifelse(length(unique(x)) <= k, length(unique(x)), k)))
+      unique_vals <- unlist(lapply(fd[,(filter_numeric + 1), drop = FALSE], function(x) ifelse(length(unique(x)) <= k, length(unique(x)), k)))
 
       # Now can construct formula
       numeric_part <- paste0(
-        "s(", colnames(fd[,(filter_numeric + 1)]), ", k = ", unique_vals, ", bs = \"", smoother, "\") + ",
+        "s(", colnames(fd)[[(filter_numeric + 1)]], ", k = ", unique_vals, ", bs = \"", smoother, "\") + ",
         collapse = ""
       )
 
@@ -160,16 +189,25 @@ lrn_gam <- function(name, family, k = 10, method = "GCV.Cp", formula = NULL, smo
     }
 
     # Can now fit!
-    return(
-      mgcv::gam(use_frm, family = family, data = fd, method = method)
-    )
+    return(list(
+      model = mgcv::gam(use_frm, family = family, data = fd, method = method),
+      instructions = instr_list
+    ))
 
   }
 
   preds <- function(object, data) {
 
-    if (!is.data.frame(data)) data <- data.frame(data)
-    predict(object, newdata = data, type = "response")
+    # Apply instruction list if necessary
+    if (!identical(object[["instructions"]], "skip")) {
+      data <- make_safe_matrix(data, object[["instructions"]])
+    }
+
+    # Then need to coerce to data frame either way
+    data <- data.frame(data)
+
+    # Then output
+    predict(object[["model"]], newdata = data, type = "response")
 
   }
 
@@ -189,14 +227,14 @@ lrn_gam <- function(name, family, k = 10, method = "GCV.Cp", formula = NULL, smo
 # Templates for mboost
 #' @export
 #' @import mboost
-lrn_mboost <- function(name, family, mstop = 100, nu = 0.1, formula = NULL, max_df = 5, knots = 20, df_factor = 0.99) {
+lrn_mboost <- function(name, family, mstop = 100, nu = 0.1, frm = NULL, max_df = 5, knots = 20, df_factor = 0.99) {
 
   if (missing(family)) stop("Please explicitly specify a family object for glm.")
 
   # Force evaluation of things to ensure they are available later...
   force(name)
   force(family)
-  force(formula)
+  force(frm)
   force(mstop)
   force(nu)
   force(max_df)
@@ -205,32 +243,40 @@ lrn_mboost <- function(name, family, mstop = 100, nu = 0.1, formula = NULL, max_
 
   fit <- function(x, y) {
 
-    # Need a data frame for GAMs
+    # Create safe matrix if necessary
+    if (is.data.frame(x) & is.null(frm)) {
+      instr_list <- create_instruction_list(x)
+      x <- make_safe_matrix(x, instr_list)
+    } else {
+      instr_list <- "skip"
+    }
+
+    # Need a data frame for Mboost
     fd <- data.frame(y = y, intr = 1, x)
 
     # Now need to construct formula
     # If provided, just use provided formula
-    if (!is.null(formula)) {
+    if (!is.null(frm)) {
 
-      use_frm <- formula
+      use_frm <- frm
 
     } else {
 
       # Get numeric columns with sufficient length
-      filter_numeric <- which(unlist(lapply(fd[,-1], function(x) is.numeric(x) & length(unique(x)) > 2)))
+      filter_numeric <- which(unlist(lapply(fd[,-1, drop = FALSE], function(x) is.numeric(x) & length(unique(x)) > 2)))
 
       # For those of sufficient length, get the number of unique values (capped at k)
-      get_n_knot <- unlist(lapply(fd[,(filter_numeric + 1)], function(x) ifelse(length(unique(x)) <= knots + 2, length(unique(x)), knots + 2)))
-      get_df <- unlist(lapply(fd[,(filter_numeric + 1)], function(x) ifelse(length(unique(x)) <= max_df, length(unique(x)) - 1, max_df)))
+      get_n_knot <- unlist(lapply(fd[,(filter_numeric + 1), drop = FALSE], function(x) ifelse(length(unique(x)) <= knots + 2, length(unique(x)), knots + 2)))
+      get_df <- unlist(lapply(fd[,(filter_numeric + 1), drop = FALSE], function(x) ifelse(length(unique(x)) <= max_df, length(unique(x)) - 1, max_df)))
 
       # Now can construct formula
       numeric_part <- paste0(
-        "bbs(", colnames(fd[,(filter_numeric + 1)]), ", df = ", get_df * df_factor, ", center = TRUE, knots = ", get_n_knot, ") + ",
+        "bbs(", colnames(fd)[[(filter_numeric + 1)]], ", df = ", get_df * df_factor, ", center = TRUE, knots = ", get_n_knot, ") + ",
         collapse = ""
       )
 
       indicator_part <- paste0(
-        "bols(", colnames(fd[,-1]), ", intercept = FALSE, df = ", df_factor, ") + ", collapse = ""
+        "bols(", colnames(fd)[-1], ", intercept = FALSE, df = ", df_factor, ") + ", collapse = ""
       )
 
       # Combine all and remove last two of string (since that is an overhang +)
@@ -240,16 +286,25 @@ lrn_mboost <- function(name, family, mstop = 100, nu = 0.1, formula = NULL, max_
     }
 
     # Can now fit!
-    return(
-      mboost::mboost(use_frm, data = fd, family = family, control = boost_control(mstop = mstop, nu = nu))
-    )
+    return(list(
+      model = mboost::mboost(use_frm, data = fd, family = family, control = boost_control(mstop = mstop, nu = nu)),
+      instructions = instr_list
+    ))
 
   }
 
   preds <- function(object, data) {
 
-    if (!is.data.frame(data)) data <- data.frame(data)
-    predict(object, newdata = data, type = "response")
+    # Apply instruction list if necessary
+    if (!identical(object[["instructions"]], "skip")) {
+      data <- make_safe_matrix(data, object[["instructions"]])
+    }
+
+    # Then need to coerce to data frame either way
+    data <- data.frame(data)
+
+    # Then output
+    predict(object[["model"]], newdata = data, type = "response")
 
   }
 
