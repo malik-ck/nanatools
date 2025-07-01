@@ -207,3 +207,36 @@ make_safe_matrix <- function(data, instr_list) {
   return(built_mat)
 
 }
+
+# Function to check whether something is an integer, with some tolerance just in case
+# Can alternatively return the rounded value to make sure
+integer_checker <- function(x, object_name = NULL, require_positive = TRUE, return = FALSE) {
+
+  if (!is.null(x)) {
+    if ((abs(round(x) - x)) > 1e-16 | !is.numeric(x)) {
+
+      if (is.null(object_name)) {
+        stop("Non-whole number of integer detected where one was expected. Please check inputs.")
+      } else {
+        stop(paste("Please specify NULL, an integer or a whole number for", object_name, collapse = " "))
+      }
+    }
+
+    # Just do this separately
+    if (require_positive == TRUE & x < 1) {
+
+      if (is.null(object_name)) {
+        stop("Non-positive integer detected where one was expected. Please check inputs.")
+      } else {
+        stop(paste("Please specify NULL, a positive integer or a whole number for", object_name, collapse = " "))
+      }
+    }
+  }
+
+  if (return == FALSE) {
+    return(NULL)
+  } else {
+    return(round(x))
+  }
+
+}
