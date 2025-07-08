@@ -119,7 +119,7 @@ lrn_glm <- function(name, family) {
       data <- data.frame(data)
 
       # Then output
-      predict(object[["model"]], newdata = data, type = "response")
+      return(as.vector(predict(object[["model"]], newdata = data, type = "response")))
 
     }
   )
@@ -174,7 +174,7 @@ lrn_gam <- function(name, family, k = 10, method = "GCV.Cp", frm = NULL, smoothe
 
       # Now can construct formula
       numeric_part <- paste0(
-        "s(", colnames(fd)[[(filter_numeric + 1)]], ", k = ", unique_vals, ", bs = \"", smoother, "\") + ",
+        "s(", colnames(fd)[(filter_numeric + 1)], ", k = ", unique_vals, ", bs = \"", smoother, "\") + ",
         collapse = ""
       )
 
@@ -207,7 +207,7 @@ lrn_gam <- function(name, family, k = 10, method = "GCV.Cp", frm = NULL, smoothe
     data <- data.frame(data)
 
     # Then output
-    predict(object[["model"]], newdata = data, type = "response")
+    return(as.vector(predict(object[["model"]], newdata = data, type = "response")))
 
   }
 
@@ -265,18 +265,23 @@ lrn_mboost <- function(name, family, mstop = 100, nu = 0.1, frm = NULL, max_df =
       # Get numeric columns with sufficient length
       filter_numeric <- which(unlist(lapply(fd[,-1, drop = FALSE], function(x) is.numeric(x) & length(unique(x)) > 2)))
 
+      # Also get if too few unique values
+      filter_tiny <- which(unlist(lapply(fd[,-1, drop = FALSE], function(x) length(unique(x)) == 1)))
+
       # For those of sufficient length, get the number of unique values (capped at k)
       get_n_knot <- unlist(lapply(fd[,(filter_numeric + 1), drop = FALSE], function(x) ifelse(length(unique(x)) <= knots + 2, length(unique(x)), knots + 2)))
       get_df <- unlist(lapply(fd[,(filter_numeric + 1), drop = FALSE], function(x) ifelse(length(unique(x)) <= max_df, length(unique(x)) - 1, max_df)))
 
       # Now can construct formula
       numeric_part <- paste0(
-        "bbs(", colnames(fd)[[(filter_numeric + 1)]], ", df = ", get_df * df_factor, ", center = TRUE, knots = ", get_n_knot, ") + ",
+        "bbs(", colnames(fd)[(filter_numeric + 1)], ", df = ", get_df * df_factor, ", center = TRUE, knots = ", get_n_knot, ") + ",
         collapse = ""
       )
 
+      indices_to_remove <- c(1, filter_tiny + 1)
+
       indicator_part <- paste0(
-        "bols(", colnames(fd)[-1], ", intercept = FALSE, df = ", df_factor, ") + ", collapse = ""
+        "bols(", colnames(fd)[-indices_to_remove], ", intercept = FALSE, df = ", df_factor, ") + ", collapse = ""
       )
 
       # Combine all and remove last two of string (since that is an overhang +)
@@ -304,7 +309,7 @@ lrn_mboost <- function(name, family, mstop = 100, nu = 0.1, frm = NULL, max_df =
     data <- data.frame(data)
 
     # Then output
-    predict(object[["model"]], newdata = data, type = "response")
+    return(as.vector(predict(object[["model"]], newdata = data, type = "response")))
 
   }
 
@@ -386,8 +391,11 @@ lrn_cv_glmnet <- function(name, family, frm = NULL, alpha = 1, nfolds = 10, nlam
     flex_list <- list()
 
     # Start by normalizing
-    flex_list[["rescale"]] <- list(means = apply(x, 2, mean), sds = apply(x, 2, sd))
-    x <- scale(x)
+    # For constant columns set sd to 1; otherwise messes things up
+    get_sds <- apply(x, 2, sd)
+    flex_list[["rescale"]] <- list(means = apply(x, 2, mean), sds = ifelse(get_sds == 0, 1, get_sds))
+    x <- sweep(x, 2, flex_list[["rescale"]][["means"]], "-")
+    x <- sweep(x, 2, flex_list[["rescale"]][["sds"]], "/")
 
     if (!is.null(tpb_knots)) {
 
@@ -433,7 +441,7 @@ lrn_cv_glmnet <- function(name, family, frm = NULL, alpha = 1, nfolds = 10, nlam
       x <- cbind(x, col_kronecker(x))
 
     } else {
-      flex_list[["create_interactions"]] <- "skip"
+      flex_list[["interactions"]] <- "skip"
     }
 
     # Can now fit!
@@ -514,12 +522,11 @@ lrn_cv_glmnet <- function(name, family, frm = NULL, alpha = 1, nfolds = 10, nlam
       ### Here only implemented for one-way interactions still!
       data <- cbind(data, col_kronecker(data))
 
-
     }
 
 
     # Then output
-    predict(object[["model"]], newx = data, type = "response", s = object[["pred_lambda"]])
+    return(as.vector(predict(object[["model"]], newx = data, type = "response", s = object[["pred_lambda"]])))
 
   }
 
