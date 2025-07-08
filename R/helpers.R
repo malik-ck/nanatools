@@ -216,7 +216,7 @@ integer_checker <- function(x, object_name = NULL, require_positive = TRUE, retu
     if ((abs(round(x) - x)) > 1e-16 | !is.numeric(x)) {
 
       if (is.null(object_name)) {
-        stop("Non-whole number of integer detected where one was expected. Please check inputs.")
+        stop("Non-whole number or integer detected where one was expected. Please check inputs.")
       } else {
         stop(paste("Please specify NULL, an integer or a whole number for", object_name, collapse = " "))
       }
@@ -237,6 +237,107 @@ integer_checker <- function(x, object_name = NULL, require_positive = TRUE, retu
     return(NULL)
   } else {
     return(round(x))
+  }
+
+}
+
+# Truncated power basis splines, useful in combination with ridge penalties.
+tps <- function(x, num_knots = 20, knot_seq = NULL, degree = 3, intercept = FALSE) {
+
+  integer_checker(degree, "the spline degree.", require_positive = FALSE)
+  integer_checker(num_knots, "the number of knots.")
+  if (degree < 0) stop("Degree needs to be non-negative.")
+
+  # Some typechecks
+  if (!is.null(num_knots) & !is.null(knot_seq)) {
+    warning("Both num_knots and knot_seq are provided. knot_seq used for construction.")
+    num_knots <- length(knot_seq)
+  }
+
+  if (is.null(num_knots) & is.null(knot_seq)) {
+    warning("Both num_knots and knot_seq are NULL. Creating basis with knots at all unique values.")
+    knot_seq <- unique(sort(x))[-c(1, length(unique(x)))]
+    num_knots <- length(knot_seq)
+  }
+
+  # Keep the order of x for re-ordering later
+  order_x <- order(x)
+  sorted_x <- sort(x)
+
+  # Get knot values if not provided (at quantiles defined via num_knots)
+  if (is.null(knot_seq)) {
+    knot_seq <- quantile(sorted_x, seq(0, 1, length.out = num_knots + 2))[-c(1, num_knots + 2)]
+  } else {
+    num_knots <- length(knot_seq)
+  }
+
+  # Build the degree-th polynomial, which is the start of the design matrix
+  start_mat <- matrix(ncol = intercept + degree, nrow = length(x))
+
+  if (intercept == TRUE) start_mat[,1] <- 1
+  for (i in 1:degree) start_mat[,i + intercept] <- sorted_x^i
+
+  # Project a sorted x into a matrix with all columns needed
+  # Also adjust following columns by subtracting knot values
+  # Cube at the end
+
+  spline_mat <- `colnames<-`(
+    cbind(start_mat,
+          pmax(
+            matrix(
+              rep(sorted_x, times = num_knots), ncol = num_knots
+            ) - matrix(
+              rep(knot_seq, each = length(x)), ncol = num_knots
+            ),
+            0)^degree
+    )[order(order_x),],
+    NULL
+  )
+
+  # Now just set some attributes
+  attr(spline_mat, "knots") <- knot_seq
+  attr(spline_mat, "range") <- c(sorted_x[[1]], sorted_x[[length(sorted_x)]])
+  attr(spline_mat, "has_intercept") <- intercept
+  attr(spline_mat, "degree") <- degree
+
+  # Set new class
+  # Might be helpful for the future, if I want to reconstruct bases via generics
+  class(spline_mat) <- c("TruncatedPowerSpline", class(spline_mat))
+
+  return(spline_mat)
+
+}
+
+# Column-wise Kronecker products, useful for tensor product smooths.
+# If mat2 is NULL, creates instead a full interaction basis for mat1.
+col_kronecker <- function(mat1, mat2 = NULL) {
+
+  if (!is.null(mat2)) {
+    if(nrow(mat1) != nrow(mat2)) {
+      stop("Please provide matrices with the same number of rows.")
+    }
+  }
+
+  if (is.null(mat2)) {
+
+    # In this case need to omit interactions among the same columns
+    num_col <- ncol(mat1)
+
+    index_1 <- unlist(lapply(seq(1, num_col), function(x) seq(x, num_col)))
+
+    index_2 <- rep(0, (num_col * (num_col + 1)) / 2)
+    index_2[cumsum(seq(num_col, 2)) + 1] <- 1
+    index_2 <- cumsum(index_2) + 1
+
+    # This gives the indeces we need; now multiply and return
+    return(mat1[,index_1] * mat1[,index_2])
+
+  } else {
+
+    get_full_prod <- apply(mat2, 2, function(x) x * mat1)
+    col_num <- ncol(mat1) * ncol(mat2)
+    return(matrix(get_full_prod, ncol = col_num, nrow = nrow(mat1)))
+
   }
 
 }

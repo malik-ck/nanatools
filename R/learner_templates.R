@@ -326,8 +326,8 @@ lrn_mboost <- function(name, family, mstop = 100, nu = 0.1, frm = NULL, max_df =
 ### rather than the entire object. Could save good memory in high-dimensional settings.
 #' @export
 #' @import glmnet
-lrn_cv_glmnet <- function(name, family, frm = NULL, alpha = 1, nfolds = 10, nlambda = 100, type_lambda = "lambda.min",
-                          tpb_knots = NULL, svd_dim = NULL, create_interactions = NULL) {
+lrn_cv_glmnet <- function(name, family, frm = NULL, alpha = 1, nfolds = 10, nlambda = 100,
+                          type_lambda = "lambda.min", tpb_knots = NULL, create_interactions = NULL) {
 
   if (missing(family)) stop("Please explicitly specify a family object for glmnet.")
 
@@ -335,7 +335,6 @@ lrn_cv_glmnet <- function(name, family, frm = NULL, alpha = 1, nfolds = 10, nlam
   integer_checker(nfolds, "the number of folds.")
   integer_checker(nlambda, "nlambda")
   integer_checker(tpb_knots, "the number of spline knots.")
-  integer_checker(svd_dim, "the singular value decomposition dimension.")
   integer_checker(create_interactions, "the interaction depth.")
 
   # Small type check for the type of lambda
@@ -351,7 +350,6 @@ lrn_cv_glmnet <- function(name, family, frm = NULL, alpha = 1, nfolds = 10, nlam
   force(nfolds)
   force(nlambda)
   force(tpb_knots)
-  force(svd_dim)
   force(create_interactions)
   force(type_lambda)
 
@@ -383,15 +381,69 @@ lrn_cv_glmnet <- function(name, family, frm = NULL, alpha = 1, nfolds = 10, nlam
 
     # Now have the design matrix in each case
     # Create splines and interactions if necessary and specified
-    ### TO DO: DO NOT HAVE SOME RELEVANT CODE WITH ME HERE
-    ### NEED TO BE PART OF INSTRUCTION LIST, GIVEN KNOTS, SINGULAR VECTORS AND INTERACTIONS
+    # For splines, choose up to num_knots knots at quantiles, unless length(x) < 3
+
+    flex_list <- list()
+
+    # Start by normalizing
+    flex_list[["rescale"]] <- list(means = apply(x, 2, mean), sds = apply(x, 2, sd))
+    x <- scale(x)
+
+    if (!is.null(tpb_knots)) {
+
+      x_lengths <- apply(x, 2, function(vrb) length(unique(vrb)))
+      get_spline_knots <- pmax(pmin(x_lengths - 2, tpb_knots), 0)
+
+      append_smooth <- matrix(nrow = nrow(x), ncol = (sum(get_spline_knots > 0) * 2) + sum(get_spline_knots))
+
+      # Append non-linear parts with pre-specified knots
+      counter <- 1
+
+      flex_list[["spline_instructions"]] <- vector("list", ncol(x))
+
+      for (i in 1:ncol(x)) {
+
+        if (get_spline_knots[[i]] == 0) {
+
+          flex_list[["spline_instructions"]][[i]] <- "skip"
+          next
+
+        } else {
+
+          get_smooth <- tps(x[,i], get_spline_knots[[i]])
+          flex_list[["spline_instructions"]][[i]] <- attr(get_smooth, "knots")
+          append_smooth[,seq(counter, counter + get_spline_knots[[i]] + 1)] <- get_smooth[,-1]
+          counter <- counter + get_spline_knots[[i]] + 2
+
+        }
+
+      }
+
+      # Through with this: now just bind together
+      x <- cbind(x, append_smooth)
+
+    }
+
+    # For interactions just iteratively create column-wise Kronecker products
+    # Right now just first-order interactions. :(
+    if (!is.null(create_interactions)) {
+
+      if (create_interactions > 2) warning("Currently only interaction orders up to 2 supported.")
+      flex_list[["interactions"]] <- 2
+      x <- cbind(x, col_kronecker(x))
+
+    } else {
+      flex_list[["create_interactions"]] <- "skip"
+    }
 
     # Can now fit!
-    get_model <- glmnet::cv.glmnet(x, y, family = family, alpha = alpha, nfolds = nfolds, nlambda = nlambda)
+    get_model <- glmnet::cv.glmnet(x, y, family = family, alpha = alpha,
+                                   nfolds = nfolds, nlambda = nlambda, standardize = FALSE)
 
     return(list(
       model = get_model,
       instructions = instr_list,
+      flexibility = flex_list,
       pred_lambda = type_lambda
     ))
 
@@ -414,6 +466,57 @@ lrn_cv_glmnet <- function(name, family, frm = NULL, alpha = 1, nfolds = 10, nlam
       }
 
     }
+
+    # Now need to match flexibility, starting with scaling
+    get_means <- object[["flexibility"]][["rescale"]][["means"]]
+    get_sds <- object[["flexibility"]][["rescale"]][["sds"]]
+
+    data <- sweep(data, 2, get_means, "-")
+    data <- sweep(data, 2, get_sds, "/")
+
+    # Now splines
+    if (!is.null(object[["flexibility"]][["spline_instructions"]])) {
+
+      get_spline_instructions <- object[["flexibility"]][["spline_instructions"]]
+      count_bs <- 0
+
+      for (i in 1:length(get_spline_instructions)) {
+        if (!identical("skip", get_spline_instructions[[i]])) {
+          count_bs <- count_bs + length(get_spline_instructions[[i]]) + 2
+        }
+      }
+
+      append_mat <- matrix(ncol = count_bs, nrow = nrow(data))
+
+      counter <- 1
+
+      for (i in 1:ncol(data)) {
+
+        if (identical(get_spline_instructions[[i]], "skip")) {
+          next
+        } else {
+
+          append_mat[,seq(counter, counter + length(get_spline_instructions[[i]]) + 1)] <-
+            tps(data[,i], knot_seq = get_spline_instructions[[i]], num_knots = NULL)[,-1]
+          counter <- counter + length(get_spline_instructions[[i]]) + 2
+
+        }
+
+      }
+
+      data <- cbind(data, append_mat)
+
+    }
+
+    # Lastly not leastly interactions
+    if (!identical(object[["flexibility"]][["interactions"]], "skip")) {
+
+      ### Here only implemented for one-way interactions still!
+      data <- cbind(data, col_kronecker(data))
+
+
+    }
+
 
     # Then output
     predict(object[["model"]], newx = data, type = "response", s = object[["pred_lambda"]])
