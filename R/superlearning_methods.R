@@ -258,7 +258,7 @@ loss.LazySL <- function(object, newdata = NULL, ensemble_fold_id = NULL, type = 
     get_preds <- suppressWarnings(predict(object = object, newdata = newdata, type = "cv",
                                           metalearner_name = NULL, output_best = FALSE))
 
-    loss_out <- lapply(get_preds, object$loss_fun_list$loss_fun, y = object$realized_y)
+    loss_out <- lapply(get_preds, object$loss_fun_list$loss_fun, y = object$y)
 
 
     return(unlist(loss_out))
@@ -276,7 +276,7 @@ loss.LazySL <- function(object, newdata = NULL, ensemble_fold_id = NULL, type = 
     get_preds <- suppressWarnings(predict(object = object, newdata = newdata, metalearner_name = NULL, type = "ensemble",
                                           ensemble_fold_id = ensemble_fold_id, output_best = FALSE))
 
-    loss_out <- lapply(get_preds, object$loss_fun_list$loss_fun, y = object$realized_y)
+    loss_out <- lapply(get_preds, object$loss_fun_list$loss_fun, y = object$y)
 
 
     return(unlist(loss_out))

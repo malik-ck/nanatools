@@ -37,18 +37,18 @@ lazy_cv_mi <- function(mi_data, y_name, var_subset = NULL, init, use_future_plan
   do_cv_mi <- function(mi_df, y_name, var_subset, init) {
 
     # First extract the treatment variable
-    y <- mi_df[,y_name]
+    get_y <- mi_df[,y_name]
 
     # Then limit the subset of variables to those in var_subset, also excluding y
     # Can then already run the function!
 
     if (!is.null(var_subset)) {
 
-      return(lazy_cv(mi_df[,colnames(mi_df) %in% var_subset], y, init))
+      return(lazy_cv(x = mi_df[,colnames(mi_df) %in% var_subset, drop = FALSE], y = get_y, init))
 
     } else {
 
-      return(lazy_cv(mi_df[,-which(colnames(mi_df) == y_name)], y, init))
+      return(lazy_cv(x = mi_df[,-which(colnames(mi_df) == y_name), drop = FALSE], y = get_y, init))
 
     }
 

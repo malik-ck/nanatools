@@ -140,7 +140,7 @@ lrn_gam <- function(name, family, k = 10, method = "GCV.Cp", frm = NULL, smoothe
 
   # Force evaluation of things to ensure they are available later...
   force(name)
-  force(formula)
+  force(frm)
   force(family)
   force(method)
   force(smoother)
@@ -174,17 +174,16 @@ lrn_gam <- function(name, family, k = 10, method = "GCV.Cp", frm = NULL, smoothe
 
       # Now can construct formula
       numeric_part <- paste0(
-        "s(", colnames(fd)[(filter_numeric + 1)], ", k = ", unique_vals, ", bs = \"", smoother, "\") + ",
-        collapse = ""
+        "s(", colnames(fd)[(filter_numeric + 1)], ", k = ", unique_vals, ", bs = \"", smoother, "\")"
       )
 
       indicator_part <- paste0(
-        colnames(fd[,-c(1, filter_numeric + 1)]), " + ", collapse = ""
+        colnames(fd[,-c(1, filter_numeric + 1)])
       )
 
       # Combine all and remove last two of string (since that is an overhang +)
-      use_frm <- paste("y ~ ", numeric_part, indicator_part, collapse = "")
-      use_frm <- formula(substr(use_frm, 1, nchar(use_frm) - 3))
+      use_frm <- paste("y ~ ", paste0(c(numeric_part, indicator_part), collapse = " + "), collapse = "")
+      use_frm <- formula(use_frm)
 
     }
 
@@ -274,19 +273,17 @@ lrn_mboost <- function(name, family, mstop = 100, nu = 0.1, frm = NULL, max_df =
 
       # Now can construct formula
       numeric_part <- paste0(
-        "bbs(", colnames(fd)[(filter_numeric + 1)], ", df = ", get_df * df_factor, ", center = TRUE, knots = ", get_n_knot, ") + ",
-        collapse = ""
+        "bbs(", colnames(fd)[(filter_numeric + 1)], ", df = ", get_df * df_factor, ", center = TRUE, knots = ", get_n_knot, ")"
       )
 
       indices_to_remove <- c(1, filter_tiny + 1)
 
       indicator_part <- paste0(
-        "bols(", colnames(fd)[-indices_to_remove], ", intercept = FALSE, df = ", df_factor, ") + ", collapse = ""
+        "bols(", colnames(fd)[-indices_to_remove], ", intercept = FALSE, df = ", df_factor, ")"
       )
 
       # Combine all and remove last two of string (since that is an overhang +)
-      use_frm <- paste("y ~ ", numeric_part, indicator_part, collapse = "")
-      use_frm <- formula(substr(use_frm, 1, nchar(use_frm) - 3))
+      use_frm <- formula(paste("y ~ ", paste0(numeric_part, indicator_part, collapse = " + "), collapse = ""))
 
     }
 
