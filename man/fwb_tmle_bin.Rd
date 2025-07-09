@@ -19,9 +19,9 @@ fwb_tmle_bin(
 \arguments{
 \item{treatment_model}{An object of class weightit, LazySL or glm such that applying "predict" to it provides propensity scores for a binary treatment.}
 
-\item{or_model}{For unstratified fits: An object of class LazySL or glm. Applying "predict" should provide estimates depending on the value provided to treatment_name.}
+\item{or_model}{An object of class LazySL or glm. Applying "predict" should provide estimates depending on the value provided to treatment_name on the response scale.}
 
-\item{treatment_name}{For unstratified fits: The name of the treatment variable. Has to have values in {1, 0}.}
+\item{treatment_name}{The name of the treatment variable. Has to have values in {1, 0}.}
 
 \item{metalearner_treatment}{If the treatment model is of class LazySL, which metalearner is to be used. If NULL and the ensemble is cross-validated, defaults to the best metalearner.}
 
@@ -33,7 +33,7 @@ fwb_tmle_bin(
 
 \item{fluctuation_family}{Family object used for targeting. Should match the way the outcome was fit originally.}
 
-\item{y_bounds}{Two-length vector. If the outcome was rescaled to be in \link{0, 1}, the upper and lower bounds used. Will rescale estimands accordingly.}
+\item{y_bounds}{Two-length vector (a, b). If the outcome was rescaled as y_tr = (y_org - a) / (b - a), back-transforms to the original scale. If y was transformed to be \link{0,1}, this is a = min(y), b = max(y).}
 }
 \value{
 A list containing a data-frame summarizing results and some additional objects used for fitting.

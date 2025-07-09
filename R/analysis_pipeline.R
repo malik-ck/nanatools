@@ -7,14 +7,14 @@
 #' Fractional Weighted Bootstrap-based TMLE, for use in nanatools
 #'
 #' @param treatment_model An object of class weightit, LazySL or glm such that applying "predict" to it provides propensity scores for a binary treatment.
-#' @param or_model For unstratified fits: An object of class LazySL or glm. Applying "predict" should provide estimates depending on the value provided to treatment_name.
-#' @param treatment_name For unstratified fits: The name of the treatment variable. Has to have values in {1, 0}.
+#' @param or_model An object of class LazySL or glm. Applying "predict" should provide estimates depending on the value provided to treatment_name on the response scale.
+#' @param treatment_name The name of the treatment variable. Has to have values in {1, 0}.
 #' @param metalearner_treatment If the treatment model is of class LazySL, which metalearner is to be used. If NULL and the ensemble is cross-validated, defaults to the best metalearner.
 #' @param metalearner_outcome If the outcome model is of class LazySL, which metalearner is to be used.  If NULL and the ensemble is cross-validated, defaults to the best metalearner.
 #' @param trim_ipw Specifies how weights are to be trimmed. NULL does no trimming. "gruber" applies the data-adaptive method provided by Gruber et al. (2022).
 #' @param n_bstrap The number of bootstrap samples used to estimate the variance of the influence curve.
 #' @param fluctuation_family Family object used for targeting. Should match the way the outcome was fit originally.
-#' @param y_bounds Two-length vector. If the outcome was rescaled to be in [0, 1], the upper and lower bounds used. Will rescale estimands accordingly.
+#' @param y_bounds Two-length vector (a, b). If the outcome was rescaled as y_tr = (y_org - a) / (b - a), back-transforms to the original scale. If y was transformed to be [0,1], this is a = min(y), b = max(y).
 #'
 #' @returns A list containing a data-frame summarizing results and some additional objects used for fitting.
 #' @import tmle
@@ -31,8 +31,6 @@ fwb_tmle_bin <- function(treatment_model, or_model, treatment_name, metalearner_
                          metalearner_outcome = NULL, trim_ipw = NULL, n_bstrap = 5000,
                          fluctuation_family = gaussian(), y_bounds = NULL) {
 
-  if (!is.null(y_bounds)) warning("Rescaling y not yet implemented. Will report on provided scale.")
-
   # Do typechecks for metalearning
   typecheck_lazy_sl_tmle(treatment_model, metalearner_treatment)
   typecheck_lazy_sl_tmle(or_model, metalearner_outcome)
@@ -41,6 +39,17 @@ fwb_tmle_bin <- function(treatment_model, or_model, treatment_name, metalearner_
   # Further typechecks
   typechecks_fwb_tmle_bin(treatment_model, or_model, treatment_name,
                           metalearner_treatment, metalearner_outcome, trim_ipw, n_bstrap)
+
+  # Handling bounds if necessary
+  if (!is.null(y_bounds)) {
+
+    if (!is.numeric(y_bounds)) stop("Please hand in a numeric vector for y_bounds.")
+    if (length(y_bounds) != 2) stop("y_bounds needs to have a length of 2.")
+
+    a_bound <- y_bounds[[1]]
+    b_bound <- y_bounds[[2]]
+
+  }
 
   if (class(treatment_model) %in% "weightit") warning("The estimand handed in for WeightIt model creation is ignored.")
 
@@ -138,6 +147,16 @@ fwb_tmle_bin <- function(treatment_model, or_model, treatment_name, metalearner_
     # Targeting:
     targeted_ref <- predict(stats::glm(y ~ 1, offset = ya0, weights = get_ccov_ref * bstrap_weight, family = fluctuation_family), type = "response")
     targeted_tx <- predict(stats::glm(y ~ 1, offset = ya1, weights = get_ccov_tx * bstrap_weight, family = fluctuation_family), type = "response")
+
+    # If bounds were specified, re-transform here
+
+    if (!is.null(y_bounds)) {
+
+      targeted_ref <- ((b_bound - a_bound) * targeted_ref) + a_bound
+      targeted_tx <- ((b_bound - a_bound) * targeted_tx) + a_bound
+
+    }
+
 
     # Map into estimands
     est_ey1 <- weighted.mean(targeted_tx, bstrap_weight)
