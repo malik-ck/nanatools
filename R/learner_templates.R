@@ -362,15 +362,14 @@ lrn_mboost <- function(name, family, offset = NULL, mstop = 100, nu = 0.1, frm =
 
 # Templates for hal9001
 #' @export
-#' @import glmnet
-lrn_cv_glmnet <- function(name, family, offset = NULL, frm = NULL, nfolds = 10, max_degree = 2, smoothness_orders = 1,
+#' @import hal9001
+lrn_hal <- function(name, family, offset = NULL, frm = NULL, max_degree = 2, smoothness_orders = 1,
                           num_knots = num_knots_generator(max_degree = max_degree, smoothness_orders = smoothness_orders,
                                                           base_num_knots_0 = 200, base_num_knots_1 = 50)) {
 
   if (missing(family)) stop("Please explicitly specify a family object for glmnet.")
 
   # Some checks ensuring there are integers where necessary
-  integer_checker(nfolds, "the number of folds.")
   integer_checker(max_degree, "the interaction degree.")
   integer_checker(smoothness_orders, "the smoothness.")
 
@@ -379,7 +378,6 @@ lrn_cv_glmnet <- function(name, family, offset = NULL, frm = NULL, nfolds = 10, 
   force(frm)
   force(offset)
   force(family)
-  force(nfolds)
   force(max_degree)
   force(smoothness_orders)
 
