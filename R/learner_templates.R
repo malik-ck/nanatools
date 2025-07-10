@@ -754,8 +754,6 @@ lrn_earth <- function(name, family = NULL, offset = NULL, degree = 2,
   force(thresh)
   force(pmethod)
   force(nfold)
-  force(family)
-  force(nk)
 
   fit <- function(x, y) {
 
