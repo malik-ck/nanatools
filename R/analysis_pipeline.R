@@ -129,6 +129,10 @@ fwb_tmle_bin <- function(treatment_model, or_model, treatment_name, metalearner_
 
   } else ps_floor <- 0
 
+  # Need predicted outcomes on canonical link scale now
+  ya0_l <- fluctuation_family$linkfun(ya0)
+  ya1_l <- fluctuation_family$linkfun(ya1)
+
   # Do the function call
   # Separate options for extracting y and x, depending on whether LazySL or GLM was used
   results_list <- matrix(rep(NA, length.out = n_bstrap * 4), ncol = 4)
@@ -145,8 +149,11 @@ fwb_tmle_bin <- function(treatment_model, or_model, treatment_name, metalearner_
     get_ccov_tx <- ifelse(a == 1, 1 / get_ps, 0)
 
     # Targeting:
-    targeted_ref <- predict(stats::glm(y ~ 1, offset = ya0, weights = get_ccov_ref * bstrap_weight, family = fluctuation_family), type = "response")
-    targeted_tx <- predict(stats::glm(y ~ 1, offset = ya1, weights = get_ccov_tx * bstrap_weight, family = fluctuation_family), type = "response")
+    ref_reg <- stats::glm(y ~ 1 + offset(ya0_l), weights = get_ccov_ref * bstrap_weight, family = fluctuation_family)
+    tx_reg <- stats::glm(y ~ 1 + offset(ya1_l), weights = get_ccov_tx * bstrap_weight, family = fluctuation_family)
+
+    targeted_ref <- predict(ref_reg, type = "response")
+    targeted_tx <- predict(tx_reg, type = "response")
 
     # If bounds were specified, re-transform here
 

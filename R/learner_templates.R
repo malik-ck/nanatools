@@ -363,9 +363,8 @@ lrn_mboost <- function(name, family, offset = NULL, mstop = 100, nu = 0.1, frm =
 # Templates for hal9001
 #' @export
 #' @import hal9001
-lrn_hal <- function(name, family, offset = NULL, frm = NULL, max_degree = 2, smoothness_orders = 1,
-                          num_knots = num_knots_generator(max_degree = max_degree, smoothness_orders = smoothness_orders,
-                                                          base_num_knots_0 = 200, base_num_knots_1 = 50)) {
+lrn_hal <- function(name, family, offset = NULL, frm = NULL, max_degree = 2,
+                    smoothness_orders = 1, num_knots = 50) {
 
   if (missing(family)) stop("Please explicitly specify a family object for glmnet.")
 
@@ -734,7 +733,7 @@ lrn_cv_glmnet <- function(name, family, offset = NULL, frm = NULL, alpha = 1, nf
 #' @export
 #' @import earth
 lrn_earth <- function(name, family = NULL, offset = NULL, degree = 2,
-                      penalty = 3, nk = min(200, max(20, 2 * ncol(x))) + 1,
+                      penalty = 3, nk = 100,
                       thresh = 0.01, pmethod = "backward", nfold = 0) {
 
   if (missing(family)) stop("Please explicitly specify a family object for earth.")
@@ -756,9 +755,7 @@ lrn_earth <- function(name, family = NULL, offset = NULL, degree = 2,
   force(pmethod)
   force(nfold)
   force(family)
-
-  # Conditionally force nk, otherwise hope it is captured in the closure
-  if (is.numeric(nk)) force(nk)
+  force(nk)
 
   fit <- function(x, y) {
 

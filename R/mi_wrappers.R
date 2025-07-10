@@ -75,15 +75,17 @@ lazy_cv_mi <- function(mi_data, y_name, var_subset = NULL, init, use_future_plan
 
   } else if (use_future_plan == TRUE) {
 
-    results_list <- vector("list", length = mi_data$m)
+    futures_list <- vector("list", length = mi_data$m)
 
     for (i in 1:mi_data$m) {
 
-      results_list[[i]] <- future::future({
+      futures_list[[i]] <- future::future({
         do_cv_mi(mice::complete(mi_data, action = i), y_name, var_subset, init)
       }, seed = TRUE, packages = init$future_pkgs)
 
     }
+
+    results_list <- lapply(futures_list, future::value)
 
     class(results_list) <- "LazySL_CV"
 
