@@ -212,7 +212,7 @@ make_loss_list <- function(loss) {
 
   } else if (loss == "binomial") {
 
-    loss_fun <- function(y, preds) (y * log(preds)) + ((1 - y) * log(1 - preds))
+    loss_fun <- function(y, preds) -mean((y * log(pmin(pmax(preds, 1e-15), 1 - 1e-15))) + ((1 - y) * log(pmin(pmax(1 - preds, 1e-15), 1 - 1e-15))))
 
     loss_fun_gradient <- function(y, preds_list, params) {
 

@@ -310,6 +310,7 @@ tps <- function(x, num_knots = 20, knot_seq = NULL, degree = 3, intercept = FALS
 
 # Column-wise Kronecker products, useful for tensor product smooths.
 # If mat2 is NULL, creates instead a full interaction basis for mat1.
+#' @export
 col_kronecker <- function(mat1, mat2 = NULL) {
 
   if (!is.null(mat2)) {
