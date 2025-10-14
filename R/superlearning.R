@@ -201,7 +201,7 @@ make_loss_list <- function(loss) {
       # Calculate loss here, output numeric vector
       alp <- do.call("cbind", preds_list)
 
-      return(crossprod(alp) %*% params - t(alp) %*% y)
+      return(as.vector(crossprod(alp) %*% params - t(alp) %*% y))
 
     }
 
@@ -219,7 +219,7 @@ make_loss_list <- function(loss) {
       # Calculate loss here, output numeric vector
       alp <- do.call("cbind", preds_list)
 
-      return(t(alp) %*% (y - (alp %*% params)))
+      return(as.vector(t(alp) %*% (y - (alp %*% params))))
 
     }
 
