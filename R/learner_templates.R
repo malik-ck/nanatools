@@ -820,3 +820,127 @@ lrn_earth <- function(name, family = NULL, offset = NULL, degree = 2,
 
 }
 
+
+# Templates for GLMs estimated via glmnet, which are computationally more stable
+#' @export
+#' @import glmnet
+lrn_bigGlm <- function(name, family, offset = NULL, frm = NULL) {
+
+  if (missing(family)) stop("Please explicitly specify a family object for bigGlm.")
+
+  # Force evaluation of things to ensure they are available later...
+  force(name)
+  force(frm)
+  force(offset)
+  force(family)
+
+  fit <- function(x, y) {
+
+    # If there is an offset, retrieve as variable and remove from data
+    if (!is.null(offset)) {
+      get_offset <- x[,offset]
+      if (!is.numeric(get_offset)) stop("Called from lrn_bigGlm: please ensure that the offset you provide is numeric.")
+
+      x <- x[,-which(colnames(x) == offset)]
+    } else {
+      get_offset <- NULL
+    }
+
+    # Make a safe matrix if necessary and no formula provided
+    if (is.data.frame(x) & is.null(frm)) {
+
+      instr_list <- create_instruction_list(x)
+      x <- make_safe_matrix(x, instr_list)
+
+    } else if (is.data.frame(x) & !is.null(frm)) { # If frm provided, use in model.matrix call
+
+      instr_list <- list(coerce_df = FALSE, frm = frm)
+      x <- model.matrix(frm, data = x)[,-1, drop = FALSE]
+
+    } else if (is.matrix(x) & is.null(frm)) { # Simplest case: take x as is
+
+      instr_list <- "skip"
+
+    } else if (is.matrix(x) & !is.null(frm)) { # If formula provided for matrix, coerce to df and warn
+
+      instr_list <- list(coerce_df = TRUE, frm = frm)
+      x <- model.matrix(frm, data = data.frame(x))[,-1, drop = FALSE]
+
+      warning("Formula provided for matrix in bigGlm.\nCoerced to data frame for call to model.matrix(); can be (silently) very unsafe!")
+
+    } else stop("Unexpected data input in bigGlm! Should not happen.")
+
+    # Now have the design matrix in each case
+    # Create splines and interactions if necessary and specified
+    # For splines, choose up to num_knots knots at quantiles, unless length(x) < 3
+
+    flex_list <- list()
+
+    # Start by normalizing
+    # For constant columns set sd to 1; otherwise messes things up
+    get_sds <- apply(x, 2, sd)
+    flex_list[["rescale"]] <- list(means = apply(x, 2, mean), sds = ifelse(get_sds == 0, 1, get_sds))
+    x <- sweep(x, 2, flex_list[["rescale"]][["means"]], "-")
+    x <- sweep(x, 2, flex_list[["rescale"]][["sds"]], "/")
+
+    # Can now fit!
+    get_model <- glmnet::bigGlm(x, y, family = family, offset = get_offset, standardize = FALSE)
+
+    return(list(
+      model = get_model,
+      instructions = instr_list,
+      flexibility = flex_list
+    ))
+
+  }
+
+  preds <- function(object, data) {
+
+    # If there is an offset, retrieve as variable and remove from data
+    if (!is.null(offset)) {
+      get_offset <- data[,offset]
+      if (!is.numeric(get_offset)) stop("Called from lrn_bigGlm: please ensure that the offset you provide is numeric.")
+
+      data <- data[,-which(colnames(data) == offset)]
+    } else {
+      get_offset <- NULL
+    }
+
+    # Apply instruction list if necessary
+    ### Ensure that creation is proper if splines and interactions implemented!
+    # Make a safe matrix if necessary and no formula provided
+    if (!(identical(object[["instructions"]], "skip"))) { # Only need logic if data not already right
+
+      # If matrix, need to coerce to df again for model matrix call
+      if (is.matrix(data)) {
+        data <- model.matrix(object[["instructions"]][["frm"]], data = data.frame(data))[,-1, drop = FALSE]
+      } else if (!is.null(object[["instructions"]][["frm"]])) {
+        data <- model.matrix(object[["instructions"]][["frm"]], data = data)[,-1, drop = FALSE]
+      } else { # Should be the last option here: df without formula
+        data <- make_safe_matrix(data, object[["instructions"]])
+      }
+
+    }
+
+    # Now need to match scaling
+    get_means <- object[["flexibility"]][["rescale"]][["means"]]
+    get_sds <- object[["flexibility"]][["rescale"]][["sds"]]
+
+    data <- sweep(data, 2, get_means, "-")
+    data <- sweep(data, 2, get_sds, "/")
+
+    return(as.vector(predict(object[["model"]], newx = data, type = "response", newoffset = get_offset)))
+
+  }
+
+  get_list <- list(
+    name = name,
+    fit = fit,
+    preds = preds
+  )
+
+  class(get_list) <- "SL_Learner"
+
+  return(get_list)
+
+}
