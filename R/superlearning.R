@@ -180,9 +180,16 @@ get_lrn_packages <- function(learner_list, metalearners) {
 
   })
 
-  metalearn_pkgs <- lapply(metalearners, function(x) lapply(fun_calls(x), find))
+  mtl_pkg_list <- lapply(metalearners, function(x) {
 
-  pkgs_only <- unlist(c(lrnr_pkg_list, metalearn_pkgs))[substr(unlist(c(lrnr_pkg_list, metalearn_pkgs)), 1, 8) == "package:"]
+    fit_pkgs <- unique(unlist(lapply(fun_calls(x$fit), find)))
+    pred_pkgs <- unique(unlist(lapply(fun_calls(x$preds), find)))
+
+    return(c(fit_pkgs, pred_pkgs))
+
+  })
+
+  pkgs_only <- unlist(c(lrnr_pkg_list, mtl_pkg_list))[substr(unlist(c(lrnr_pkg_list, mtl_pkg_list)), 1, 8) == "package:"]
 
   pkg_vec <- unique(c(substr(pkgs_only, 9, 100), "nanatools"))
 
@@ -255,7 +262,7 @@ make_loss_list <- function(loss) {
 #' @examples
 #' data(iris)
 learner_setup <- function(learner_list, inner_cv = 5, outer_cv = 5, loss = "gaussian",
-                          metalearners = list(NNLogLik = "NNLogLik")) {
+                          metalearners = list(mtl_selector("Selected"))) {
 
   # Extracting a function accessing the outcome
 
@@ -264,14 +271,6 @@ learner_setup <- function(learner_list, inner_cv = 5, outer_cv = 5, loss = "gaus
 
   # Generate weight-creating metalearning function depending on input
   # An AUC-based metalearner might be a nice addition for the future
-
-  # Check that all metalearners specified have a name
-  if (any(names(metalearners) == "")) {
-    stop("Please give each metalearner in the metalearner list a name.")
-  }
-
-  metalearner_list <- vector("list", length(metalearners))
-  metalearner_names <- rep(NA, length(metalearners))
 
   # Create a list for the provided loss function
   if (!is.character(loss) & !is.list(loss)) {
@@ -293,116 +292,6 @@ learner_setup <- function(learner_list, inner_cv = 5, outer_cv = 5, loss = "gaus
 
   }
 
-  # Create all metalearners
-
-  for (i in 1:length(metalearner_list)) {
-
-    metalearner <- metalearners[[i]]
-    metalearner_name <- names(metalearners)[[i]]
-
-    if (!is.function(metalearner)) {
-
-      if (metalearner != "NNLogLik" & metalearner != "select") {
-
-        stop("Please specify a valid option or a custom function for all metalearners.")
-
-      }
-
-      if (metalearner == "select") {
-
-        meta_fx <- function(y, preds_list, loss_fun_list) {
-
-          # Calculate loss for each learner in list
-          all_losses <- sapply(preds_list, function(x) loss_fun_list$loss_fun(y = y, preds = x))
-
-          best <- which.min(sapply(all_losses, function(x) x))
-
-          weights <- rep(0, length(preds_list))
-
-          weights[[best]] <- 1
-
-          names(weights) <- names(preds_list)
-
-          return(weights)
-
-        }
-
-
-      } else if (metalearner == "NNLogLik") {
-
-        meta_fx <- function(y, preds_list, loss_fun_list) {
-
-          # Ensure that gradient is provided for the superlearner-metalearner
-          if (is.null(loss_fun_list$loss_fun_gradient)) {
-            stop("For the superlearner metalearner, please provide the gradient of the loss function.")
-          }
-
-          # Get nloptr-format loss-functions
-          get_ensemble_from_preds <- function(y, loss_fun, preds_list, params) apply(sapply(preds_list, cbind) %*% params, 2, loss_fun, y = y)
-          nloptr_loss <- function(x) get_ensemble_from_preds(y = y, loss_fun = loss_fun_list$loss_fun, preds_list = preds_list, params = x)
-
-          nloptr_gradient <- function(x) loss_fun_list$loss_fun_gradient(y = y, preds_list = preds_list, params = x)
-
-          # Equality constraint: sum of coefficients = 1
-          eval_g_eq <- function(x) {
-            sum(x) - 1
-          }
-
-          # Inequality constraint: all coefficients >= 0
-          eval_g_ineq <- function(x) {
-            -x # Each beta_i should be >= 0, so -beta <= 0
-          }
-
-          # Jacobian for equality constraint
-          jacobian_eq <- function(x) {
-            matrix(1, nrow = 1, ncol = length(x)) # A row vector of 1s
-          }
-
-          # Jacobian for inequality constraint
-          jacobian_ineq <- function(x) {
-            diag(-1, length(x)) # A diagonal matrix with -1 on the diagonal
-          }
-
-          # Starting values
-          init_params <- rep(1/length(preds_list), length(preds_list))
-
-          # Other args
-          result <- nloptr(
-            x0 = init_params,             # Initial guess
-            eval_f = nloptr_loss,     # Objective function
-            eval_grad_f = nloptr_gradient,
-            eval_g_eq = eval_g_eq,
-            eval_g_ineq = eval_g_ineq,
-            eval_jac_g_eq = jacobian_eq,
-            eval_jac_g_ineq = jacobian_ineq,
-            opts = list(algorithm = "NLOPT_LD_SLSQP", # Optimization algorithm
-                        xtol_rel = 1e-8,
-                        maxeval = 1e8),               # Convergence tolerance
-          )
-
-          sl_coefs <- result$solution
-          names(sl_coefs) <- names(preds_list)
-
-          return(sl_coefs)
-
-        }
-
-      }
-
-    } else if (is.function(metalearner)) {
-
-      meta_fx <- metalearner
-
-    }
-
-    metalearner_list[[i]] <- meta_fx
-    metalearner_names[[i]] <- names(metalearners)[[i]]
-
-  }
-
-  names(metalearner_list) <- metalearner_names
-
-
   # Create a config-file. Should eventually be adjustable.
   config <- list(
     w_tol = 0.001,
@@ -410,12 +299,12 @@ learner_setup <- function(learner_list, inner_cv = 5, outer_cv = 5, loss = "gaus
   )
 
   # Get dependencies
-  depends_pkgs <- get_lrn_packages(learner_list = learner_list, metalearners = metalearner_list)
+  depends_pkgs <- get_lrn_packages(learner_list = learner_list, metalearners = metalearners)
 
   # Already save the return list, except CV
   return_list <- list(
     learner_list = learner_list,
-    metalearners = metalearner_list,
+    metalearners = metalearners,
     loss_fun_list = loss_fun_list,
     future_pkgs = depends_pkgs
   )
@@ -464,14 +353,9 @@ train_ensemble_nuisance <- function(x, y, cv_list, metalearners, learner_list, l
   names(preds_list) <- lapply(learner_list, function(x) x$name)
 
   # Apply metalearners to prediction df iteratively
-  wt_list <- lapply(metalearners, function(mtl) mtl(y = y[sort(unlist(cv_list[[1]]))], preds_list = preds_list, loss_fun_list = loss_fun_list))
+  wt_list <- lapply(metalearners, function(mtl) fit(mtl, y = y[sort(unlist(cv_list[[1]]))], preds_list = preds_list, loss_fun_list = loss_fun_list))
 
-  # Then, round according to weight tolerance and rescale
-  rounded_wt_list <- lapply(wt_list, function(x) ifelse(abs(x) < w_tol, 0, x) / sum(ifelse(abs(x) < w_tol, 0, x)))
-
-
-  # Round weights down if below tolerance and return
-  return(rounded_wt_list)
+  return(wt_list)
 
 }
 
@@ -518,11 +402,12 @@ get_losses_across_ensembles <- function(x, y, cv_list, get_all_learners, get_all
     all_preds <- vector("list", length(learner_subset))
     for (i in 1:length(all_preds)) all_preds[[i]] <- predict(learner_subset[[i]], newdata = val_set)
 
-    # Now apply all ensembles to predictions
-    pred_mat <- do.call("cbind", all_preds)
-    colnames(pred_mat) <- names(learner_subset)
+    # Now apply all ensembles to predictions and calculate losses
+    ensembled_predictions <- lapply(ensemble_subset, function(mtl) predict(mtl, all_preds))
+    ensembled_losses <- lapply(ensembled_predictions, function(x) loss_fun(y_ss, x))
+    names(ensembled_losses) <- lapply(ensemble_subset, function(x) x$name)
 
-    return(sapply(ensemble_subset, function(x) loss_fun(y_ss, pred_mat %*% x)))
+    return(do.call("cbind", ensembled_losses))
 
   }
 
@@ -554,7 +439,6 @@ get_losses_across_ensembles <- function(x, y, cv_list, get_all_learners, get_all
 #' @returns A list of class lazycv containing results of the superlearner.
 #' @export
 #' @import future.apply
-#' @import nloptr
 #'
 #' @examples
 #' data(iris)

@@ -71,23 +71,20 @@ predict.LazySL <- function(object, newdata = NULL, metalearner_name = NULL, outp
       warning("No metalearner specified. Output is provided for all metalearners.
             If you instead want predictions from the best metalearner only and have a cross-validated ensemble, set output_best to TRUE.")
 
-      metalearner_name <- names(object$metalearners)
+      metalearner_name <- unlist(lapply(object$metalearners, function(x) x$name))
 
     }
 
     # Write a function that predicts for one set of folds
-    predict_one_fold <- function(ensemble, weights, validation_set, newdata = NULL) {
+    predict_one_fold <- function(ensemble, metalearner, validation_set, newdata = NULL) {
 
-      preds_vec <- rep(0, length(validation_set))
+      # Get learner outputs into a list
+      preds_list <- vector("list", length(ensemble))
 
-      for (i in 1:length(ensemble)) {
+      for (i in 1:length(ensemble)) preds_list[[i]] <- predict(ensemble[[i]], newdata = newdata)
 
-        current_preds <- predict(ensemble[[i]], newdata = newdata)
-        current_weight <- weights[ensemble[[i]]$name]
-
-        preds_vec <- preds_vec + current_preds*current_weight
-
-      }
+      # Now apply metalearner to that list
+      preds_vec <- predict(metalearner, preds_list)
 
       return_matrix <- cbind(index = validation_set, preds = preds_vec)
       colnames(return_matrix) <- c("index", "preds")
@@ -103,19 +100,22 @@ predict.LazySL <- function(object, newdata = NULL, metalearner_name = NULL, outp
 
       current_validation_set <- object$cv$performance_sets[[i]]$validation_set
 
-      # Get relevant subset of ensemble weights
-      weight_subset <- object$ensembles[[i]][names(object$ensembles[[i]]) %in% metalearner_name]
+      # Get relevant subset of fitted metalearners
+      metalearner_subset <- object$ensembles[[i]][lapply(object$ensembles[[i]], function(x) x$name) %in% metalearner_name]
 
-
-      pred_list[[i]] <- lapply(weight_subset, predict_one_fold,
+      pred_list[[i]] <- lapply(metalearner_subset, predict_one_fold,
                                ensemble = object$fit_objects[[i]], validation_set = current_validation_set,
                                newdata = newdata[current_validation_set,])
+
+      names(pred_list[[i]]) <- metalearner_name
 
     }
 
     wrangled_preds <- lapply(metalearner_name,
                              function(x) lapply(pred_list, function(y) y[[x]])
     )
+
+    names(wrangled_preds) <- metalearner_name
 
     combined_preds <- lapply(wrangled_preds, function(x) do.call("rbind", x))
     names(combined_preds) <- metalearner_name
@@ -195,18 +195,17 @@ predict.LazySL <- function(object, newdata = NULL, metalearner_name = NULL, outp
 
     pred_engine <- function(metalearner_name, newdata, list_obj, ensemble_fold_id) {
 
-      preds_vec <- rep(0, nrow(newdata))
+      # Get learner outputs into a list
+      preds_list <- vector("list", length(list_obj$learners))
 
-      for (i in 1:length(list_obj$learners)) {
+      for (i in 1:length(list_obj$learners)) preds_list[[i]] <- predict(list_obj$fit_objects[[ensemble_fold_id]][[i]], newdata)
 
-        current_preds <- predict(list_obj$fit_objects[[ensemble_fold_id]][[i]], newdata)
-        current_weight <- list_obj$ensembles[[ensemble_fold_id]][[metalearner_name]][list_obj$learners[[i]]$name]
+      # Get position of metalearner we want
+      mtl_pos <- which(unlist(lapply(list_obj$ensembles[[ensemble_fold_id]], function(x) x$name)) == metalearner_name)
 
-        preds_vec <- preds_vec + current_preds*current_weight
-
-        names(preds_vec) <- NULL
-
-      }
+      # Now apply that metalearner to our prediction list
+      preds_vec <- predict(list_obj$ensembles[[ensemble_fold_id]][[mtl_pos]], preds_list)
+      names(preds_vec) <- NULL
 
       return(preds_vec)
 

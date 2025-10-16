@@ -9,7 +9,7 @@ learner_setup(
   inner_cv = 5,
   outer_cv = 5,
   loss = "gaussian",
-  metalearners = list(NNLogLik = "NNLogLik")
+  metalearners = list(mtl_selector("Selected"))
 )
 }
 \arguments{
