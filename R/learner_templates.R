@@ -823,7 +823,6 @@ lrn_earth <- function(name, family = NULL, offset = NULL, degree = 2,
 
 # Templates for GLMs estimated via glmnet, which are computationally more stable
 #' @export
-#' @import glmnet
 lrn_bigGlm <- function(name, family, offset = NULL, frm = NULL) {
 
   if (missing(family)) stop("Please explicitly specify a family object for bigGlm.")
