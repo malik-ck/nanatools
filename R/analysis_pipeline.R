@@ -15,8 +15,9 @@
 #' @param n_bstrap The number of bootstrap samples used to estimate the variance of the influence curve.
 #' @param fluctuation_family Family object used for targeting. Should match the way the outcome was fit originally.
 #' @param y_bounds Two-length vector (a, b). If the outcome was rescaled as y_tr = (y_org - a) / (b - a), back-transforms to the original scale. If y was transformed to be [0,1], this is a = min(y), b = max(y).
+#' @param custom_parameters A list of functions, each with two arguments for the mean of treated and untreated counterfactuals, respectively. If NULL, automatically detects whether to report a log relative ATE or log odds ratio in addition to treatment-specific means and the ATE.
 #'
-#' @returns A list containing a data-frame summarizing results and some additional objects used for fitting.
+#' @returns A list containing a data-frame summarizing results (with at least both treatment-specific means and the ATE) and some additional objects used for fitting.
 #' @import tmle
 #' @export
 #'
@@ -29,7 +30,7 @@
 #' data(iris)
 fwb_tmle_bin <- function(treatment_model, or_model, treatment_name, metalearner_treatment = NULL,
                          metalearner_outcome = NULL, trim_ipw = NULL, n_bstrap = 5000,
-                         fluctuation_family = gaussian(), y_bounds = NULL) {
+                         fluctuation_family = gaussian(), y_bounds = NULL, custom_parameters = NULL) {
 
   # Do typechecks for metalearning
   typecheck_lazy_sl_tmle(treatment_model, metalearner_treatment)
@@ -38,7 +39,7 @@ fwb_tmle_bin <- function(treatment_model, or_model, treatment_name, metalearner_
 
   # Further typechecks
   typechecks_fwb_tmle_bin(treatment_model, or_model, treatment_name,
-                          metalearner_treatment, metalearner_outcome, trim_ipw, n_bstrap)
+                          metalearner_treatment, metalearner_outcome, trim_ipw, n_bstrap, custom_parameters)
 
   # Handling bounds if necessary
   if (!is.null(y_bounds)) {
@@ -114,6 +115,28 @@ fwb_tmle_bin <- function(treatment_model, or_model, treatment_name, metalearner_
 
   }
 
+
+  # Identify and write out bespoke target parameters
+  # If custom_parameters is NULL, identify whether a log relative risk of log odds ratio is reasonable
+  if (is.null(custom_parameters)) {
+
+    custom_parameters <- list()
+
+    # Add log relative ATE if sensible
+    if (all(y >= 0)) {
+      custom_parameters <- append(custom_parameters, function(y1, y0) log(y1 / y0))
+      names(custom_parameters)[length(custom_parameters)] <- "Log_Relative_ATE"
+    }
+
+    # Add log odds ratio if sensible
+    if (all(((y == 0) + (y == 1)) == 1)) {
+      custom_parameters <- append(custom_parameters, function(y1, y0) log(y1 / (1 - y1)) - log(y0 / (1 - y0)))
+      names(custom_parameters)[length(custom_parameters)] <- "Log_Odds_Ratio"
+    }
+
+  }
+
+
   # Now have all info I need to do tmle
   # First, transform to weights from PS and truncate if requested
   if (!is.null(trim_ipw)) {
@@ -135,8 +158,8 @@ fwb_tmle_bin <- function(treatment_model, or_model, treatment_name, metalearner_
 
   # Do the function call
   # Separate options for extracting y and x, depending on whether LazySL or GLM was used
-  results_list <- matrix(rep(NA, length.out = n_bstrap * 4), ncol = 4)
-  colnames(results_list) <- c("EY1", "EY0", "ATE", "RR")
+  results_list <- matrix(rep(NA, length.out = n_bstrap * (3 + length(custom_parameters))), ncol = (3 + length(custom_parameters)))
+  colnames(results_list) <- c("EY1", "EY0", "ATE", names(custom_parameters))
 
   # Now bootstrap!
 
@@ -169,9 +192,19 @@ fwb_tmle_bin <- function(treatment_model, or_model, treatment_name, metalearner_
     est_ey1 <- weighted.mean(targeted_tx, bstrap_weight)
     est_ey0 <- weighted.mean(targeted_ref, bstrap_weight)
     est_ate <- est_ey1 - est_ey0
-    est_rr <- est_ey1 / est_ey0
 
-    results_list[i,] <- c(est_ey1, est_ey0, est_ate, est_rr)
+    assemble_params <- c(est_ey1, est_ey0, est_ate)
+
+    # Any bespoke parameters?
+    if (length(custom_parameters) > 0) {
+
+      for (k in 1:length(custom_parameters)) {
+        assemble_params <- c(assemble_params, custom_parameters[[k]](est_ey1, est_ey0))
+      }
+
+    }
+
+    results_list[i,] <- assemble_params
 
   }
 

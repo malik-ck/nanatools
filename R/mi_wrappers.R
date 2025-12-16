@@ -106,6 +106,7 @@ lazy_cv_mi <- function(mi_data, y_name, var_subset = NULL, init, use_future_plan
 #' @param n_bstrap The number of bootstrap samples used to estimate the variance of the influence curve.
 #' @param fluctuation_family Family object used for targeting. Should match the way the outcome was fit originally.
 #' @param y_bounds Two-length vector. If the outcome was rescaled to be in [0, 1], the upper and lower bounds used. Will rescale estimands accordingly.
+#' @param custom_parameters A list of functions, each with two arguments for the mean of treated and untreated counterfactuals, respectively. If NULL, automatically detects whether to report a log relative ATE or log odds ratio in addition to treatment-specific means and the ATE.
 #'
 #' @returns A list containing a data-frame summarizing results after pooling for multiple imputation, additional data frames for each imputed data set, as well as some additional objects used for fitting.
 #'
@@ -116,16 +117,49 @@ lazy_cv_mi <- function(mi_data, y_name, var_subset = NULL, init, use_future_plan
 #' data(iris)
 fwb_tmle_bin_mi <- function(treatment_models, or_models, treatment_name, metalearner_treatment = NULL,
                             metalearner_outcome = NULL, trim_ipw = NULL, n_bstrap = 5000,
-                            fluctuation_family = gaussian(), y_bounds = NULL) {
+                            fluctuation_family = gaussian(), y_bounds = NULL, custom_parameters = NULL) {
 
   # Some modest typechecking. First, ensure number of imputations are identical across treatment and outcome model
   # Of course, imputations also need to be identical, but checking this is too data-intensive (have some trust here)
   if ("wimids" %in% class(treatment_models)) tx_imps <- length(treatment_models$models) else tx_imps <- length(treatment_models)
   if (length(or_models) != tx_imps) stop("Different number of imputations between treatment and outcome models.\nPlease make sure you used the same imputed data.")
 
+  # Handle custom_parameters here already; need to ensure they can't change between imputations when detected automatically
+  y <- or_models[[1]]$y
+
+  # Also copy typechecks here...
+  if (!is.null(custom_parameters) & !is.list(custom_parameters)) stop("custom_parameters has to be NULL or a list.")
+
+  if (is.list(custom_parameters) & length(custom_parameters) > 0) {
+
+    for (k in 1:length(custom_parameters)) {
+      if (!is.function(custom_parameters[[k]])) stop("If you pass a list for custom_parameters, each contained element needs to be a function.")
+    }
+
+  }
+
+  # Now copy custom parameter creation
+  if (is.null(custom_parameters)) {
+
+    custom_parameters <- list()
+
+    # Add log relative ATE if sensible
+    if (all(y >= 0)) {
+      custom_parameters <- append(custom_parameters, function(y1, y0) log(y1 / y0))
+      names(custom_parameters)[length(custom_parameters)] <- "Log_Relative_ATE"
+    }
+
+    # Add log odds ratio if sensible
+    if (all(((y == 0) + (y == 1)) == 1)) {
+      custom_parameters <- append(custom_parameters, function(y1, y0) log(y1 / (1 - y1)) - log(y0 / (1 - y0)))
+      names(custom_parameters)[length(custom_parameters)] <- "Log_Odds_Ratio"
+    }
+
+  }
+
   # Now a matter of looping to calculate results
-  all_means <- matrix(rep(NA, 4 * tx_imps), ncol = 4)
-  all_vars <- matrix(rep(NA, 4 * tx_imps), ncol = 4)
+  all_means <- matrix(rep(NA, (3 + length(custom_parameters)) * tx_imps), ncol = (3 + length(custom_parameters)))
+  all_vars <- matrix(rep(NA, (3 + length(custom_parameters)) * tx_imps), ncol = (3 + length(custom_parameters)))
   temp <- vector("list", length = tx_imps)
 
   if ("wimids" %in% class(treatment_models)) {
@@ -134,7 +168,7 @@ fwb_tmle_bin_mi <- function(treatment_models, or_models, treatment_name, metalea
 
       temp[[i]] <- fwb_tmle_bin(treatment_models$models[[i]], or_models[[i]], treatment_name,
                                 metalearner_treatment, metalearner_outcome,
-                                trim_ipw, n_bstrap, fluctuation_family, y_bounds)
+                                trim_ipw, n_bstrap, fluctuation_family, y_bounds, custom_parameters)
 
       all_means[i,] <- temp[[i]]$results[,2]
       all_vars[i,] <- temp[[i]]$results[,3]
@@ -147,7 +181,7 @@ fwb_tmle_bin_mi <- function(treatment_models, or_models, treatment_name, metalea
 
       temp[[i]] <- fwb_tmle_bin(treatment_models[[i]], or_models[[i]], treatment_name,
                                 metalearner_treatment, metalearner_outcome,
-                                trim_ipw, n_bstrap, fluctuation_family, y_bounds)
+                                trim_ipw, n_bstrap, fluctuation_family, y_bounds, custom_parameters)
 
       all_means[i,] <- temp[[i]]$results[,2]
       all_vars[i,] <- temp[[i]]$results[,3]
@@ -166,7 +200,7 @@ fwb_tmle_bin_mi <- function(treatment_models, or_models, treatment_name, metalea
 
   # Again get it into a nice-looking data frame
   results_df <- data.frame(
-    Estimand = c("EY1", "EY0", "ATE", "RR"),
+    Estimand = c("EY1", "EY0", "ATE", names(custom_parameters)),
     Pooled_Estimate = pooled_effects,
     Pooled_Variance = total_var,
     Pooled_Lower_CI = pooled_effects - (1.96 * sqrt(total_var)),

@@ -1,4 +1,13 @@
 
+# Check newest version
+#' @export
+last_update <- function() {
+  message("Last push: ",
+          system(
+            "git log -1 --format=%cd",
+            intern = TRUE
+          ))
+}
 
 # Draw from a uniform dirichlet distribution
 r_unif_dirichlet <- function(n, k) {
@@ -61,10 +70,20 @@ typecheck_lazy_sl_tmle <- function(model_obj, metalearner_type) {
 }
 
 typechecks_fwb_tmle_bin <- function(treatment_model, or_full, treatment_name,
-                                    metalearner_treatment, metalearner_outcome, trim_ipw, n_bstrap) {
+                                    metalearner_treatment, metalearner_outcome, trim_ipw, n_bstrap, custom_parameters) {
 
   if (is.null(treatment_name)) stop("Please provide a treatment name.")
   if (is.null(or_full)) stop("Please provide an outcome model.")
+
+  if (!is.null(custom_parameters) & !is.list(custom_parameters)) stop("custom_parameters has to be NULL or a list.")
+
+  if (is.list(custom_parameters) & length(custom_parameters) > 0) {
+
+    for (i in 1:length(custom_parameters)) {
+      if (!is.function(custom_parameters[[i]])) stop("If you pass a list for custom_parameters, each contained element needs to be a function.")
+    }
+
+  }
 
 }
 
