@@ -25,7 +25,7 @@ make_cv_funs <- function(inner_cv, outer_cv) {
 
     if (!is.null(object) & !is.function(object) &
         ((!is.numeric(object)) | (is.numeric(object) && (length(object) != 1 || object < 2))) &
-        (!is.list(object) | (is.list(object) & !all(unlist(lapply(object, function(x) "training_set" %in% names(x) && "validation_set" %in% names(x))))))) {
+        (!is.list(object))) {
 
       stop("Please input a positive integer >=2, a function, or correctly formatted lists of training and validation sets for CV.")
     }
