@@ -107,6 +107,7 @@ lazy_cv_mi <- function(mi_data, y_name, var_subset = NULL, init, use_future_plan
 #' @param fluctuation_family Family object used for targeting. Should match the way the outcome was fit originally.
 #' @param y_bounds Two-length vector. If the outcome was rescaled to be in [0, 1], the upper and lower bounds used. Will rescale estimands accordingly.
 #' @param custom_parameters A list of functions, each with two arguments for the mean of treated and untreated counterfactuals, respectively. If NULL, automatically detects whether to report a log relative ATE or log odds ratio in addition to treatment-specific means and the ATE.
+#' @param cluster An optional cluster variable to cluster the bootstrap by.
 #'
 #' @returns A list containing a data-frame summarizing results after pooling for multiple imputation, additional data frames for each imputed data set, as well as some additional objects used for fitting.
 #'
@@ -117,7 +118,7 @@ lazy_cv_mi <- function(mi_data, y_name, var_subset = NULL, init, use_future_plan
 #' data(iris)
 fwb_tmle_bin_mi <- function(treatment_models, or_models, treatment_name, metalearner_treatment = NULL,
                             metalearner_outcome = NULL, trim_ipw = NULL, n_bstrap = 5000,
-                            fluctuation_family = gaussian(), y_bounds = NULL, custom_parameters = NULL) {
+                            fluctuation_family = gaussian(), y_bounds = NULL, custom_parameters = NULL, cluster = NULL) {
 
   # Some modest typechecking. First, ensure number of imputations are identical across treatment and outcome model
   # Of course, imputations also need to be identical, but checking this is too data-intensive (have some trust here)
@@ -168,7 +169,7 @@ fwb_tmle_bin_mi <- function(treatment_models, or_models, treatment_name, metalea
 
       temp[[i]] <- fwb_tmle_bin(treatment_models$models[[i]], or_models[[i]], treatment_name,
                                 metalearner_treatment, metalearner_outcome,
-                                trim_ipw, n_bstrap, fluctuation_family, y_bounds, custom_parameters)
+                                trim_ipw, n_bstrap, fluctuation_family, y_bounds, custom_parameters, cluster)
 
       all_means[i,] <- temp[[i]]$results[,2]
       all_vars[i,] <- temp[[i]]$results[,3]
@@ -181,7 +182,7 @@ fwb_tmle_bin_mi <- function(treatment_models, or_models, treatment_name, metalea
 
       temp[[i]] <- fwb_tmle_bin(treatment_models[[i]], or_models[[i]], treatment_name,
                                 metalearner_treatment, metalearner_outcome,
-                                trim_ipw, n_bstrap, fluctuation_family, y_bounds, custom_parameters)
+                                trim_ipw, n_bstrap, fluctuation_family, y_bounds, custom_parameters, cluster)
 
       all_means[i,] <- temp[[i]]$results[,2]
       all_vars[i,] <- temp[[i]]$results[,3]

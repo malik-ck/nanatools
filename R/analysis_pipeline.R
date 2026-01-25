@@ -16,6 +16,7 @@
 #' @param fluctuation_family Family object used for targeting. Should match the way the outcome was fit originally.
 #' @param y_bounds Two-length vector (a, b). If the outcome was rescaled as y_tr = (y_org - a) / (b - a), back-transforms to the original scale. If y was transformed to be [0,1], this is a = min(y), b = max(y).
 #' @param custom_parameters A list of functions, each with two arguments for the mean of treated and untreated counterfactuals, respectively. If NULL, automatically detects whether to report a log relative ATE or log odds ratio in addition to treatment-specific means and the ATE.
+#' @param cluster Optional cluster variable by which to cluster the boostrap.
 #'
 #' @returns A list containing a data-frame summarizing results (with at least both treatment-specific means and the ATE) and some additional objects used for fitting.
 #' @import tmle
@@ -30,7 +31,7 @@
 #' data(iris)
 fwb_tmle_bin <- function(treatment_model, or_model, treatment_name, metalearner_treatment = NULL,
                          metalearner_outcome = NULL, trim_ipw = NULL, n_bstrap = 5000,
-                         fluctuation_family = gaussian(), y_bounds = NULL, custom_parameters = NULL) {
+                         fluctuation_family = gaussian(), y_bounds = NULL, custom_parameters = NULL, cluster = NULL) {
 
   # Do typechecks for metalearning
   typecheck_lazy_sl_tmle(treatment_model, metalearner_treatment)
@@ -162,10 +163,29 @@ fwb_tmle_bin <- function(treatment_model, or_model, treatment_name, metalearner_
   colnames(results_list) <- c("EY1", "EY0", "ATE", names(custom_parameters))
 
   # Now bootstrap!
+  # Cluster the boostrap, if desired
 
   for (i in 1:nrow(results_list)) {
 
-    bstrap_weight <- r_unif_dirichlet(1, length(y))
+    if (is.null(cluster)) {
+      bstrap_weight <- r_unif_dirichlet(1, length(y))
+    } else {
+
+      # Cluster FWB has one weight per cluster
+      get_cluster_ids <- unique(cluster)
+      weight_per_cluster <- r_unif_dirichlet(1, length(get_cluster_ids))
+
+      # Map weights to IDs
+      names(weight_per_cluster) <- get_cluster_ids
+
+      # 2. Expand back to the original length of y
+      bstrap_weight <- weight_per_cluster[as.character(cluster)]
+
+      # Make numeric
+      bstrap_weight <- unname(bstrap_weight)
+    }
+
+
 
     # Clever covariates:
     get_ccov_ref <- ifelse(a == 0, 1 / get_ps, 0)
@@ -235,7 +255,8 @@ fwb_tmle_bin <- function(treatment_model, or_model, treatment_name, metalearner_
     clever_covariate_control = get_ccov_ref,
     bootstrap_samples = n_bstrap,
     fluctuation = fluctuation_family,
-    ps_bound = ps_floor
+    ps_bound = ps_floor,
+    all_results = results_list
   )
 
   class(results_list) <- "FWB_TMLE"
