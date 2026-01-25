@@ -509,7 +509,9 @@ lazy_cv <- function(x, y, init) {
   ensemble_cv <- ifelse(!is.null(init$cv$performance_sets), TRUE, FALSE)
 
   if (is.null(init$cv$performance_sets)) {
-    init$cv$performance_sets <- unlist(init$cv$build_sets, recursive = FALSE)
+    # Assume here that the first folds specified in build sets are generally applicable
+    init$cv$performance_sets = list(list(training_set = unname(unlist(test$cv$build_sets[[1]][[1]])),
+                                         validation_set = unname(unlist(test$cv$build_sets[[1]][[1]]))))
   }
 
   get_all_learners <- fit_ensemble(
