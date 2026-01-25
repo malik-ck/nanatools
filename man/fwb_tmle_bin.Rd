@@ -14,7 +14,8 @@ fwb_tmle_bin(
   n_bstrap = 5000,
   fluctuation_family = gaussian(),
   y_bounds = NULL,
-  custom_parameters = NULL
+  custom_parameters = NULL,
+  cluster = NULL
 )
 }
 \arguments{
@@ -37,6 +38,8 @@ fwb_tmle_bin(
 \item{y_bounds}{Two-length vector (a, b). If the outcome was rescaled as y_tr = (y_org - a) / (b - a), back-transforms to the original scale. If y was transformed to be \link{0,1}, this is a = min(y), b = max(y).}
 
 \item{custom_parameters}{A list of functions, each with two arguments for the mean of treated and untreated counterfactuals, respectively. If NULL, automatically detects whether to report a log relative ATE or log odds ratio in addition to treatment-specific means and the ATE.}
+
+\item{cluster}{Optional cluster variable by which to cluster the boostrap.}
 }
 \value{
 A list containing a data-frame summarizing results (with at least both treatment-specific means and the ATE) and some additional objects used for fitting.

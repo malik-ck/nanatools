@@ -14,7 +14,8 @@ fwb_tmle_bin_mi(
   n_bstrap = 5000,
   fluctuation_family = gaussian(),
   y_bounds = NULL,
-  custom_parameters = NULL
+  custom_parameters = NULL,
+  cluster = NULL
 )
 }
 \arguments{
@@ -33,6 +34,8 @@ fwb_tmle_bin_mi(
 \item{y_bounds}{Two-length vector. If the outcome was rescaled to be in \link{0, 1}, the upper and lower bounds used. Will rescale estimands accordingly.}
 
 \item{custom_parameters}{A list of functions, each with two arguments for the mean of treated and untreated counterfactuals, respectively. If NULL, automatically detects whether to report a log relative ATE or log odds ratio in addition to treatment-specific means and the ATE.}
+
+\item{cluster}{An optional cluster variable to cluster the bootstrap by.}
 
 \item{treatment_model}{An object of class LazySL_CV or weightthem. For LazySL_CV objects, applying "predict" to individual ensembles should provide estimated propensity scores.}
 
