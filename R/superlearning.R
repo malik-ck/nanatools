@@ -169,9 +169,9 @@ create_cv_folds <- function(data, inner_cv, outer_cv) {
 
 }
 
-get_lrn_packages <- function(learner_list, metalearners) {
+get_lrn_packages <- function(learners, metalearners) {
 
-  lrnr_pkg_list <- lapply(learner_list, function(x) {
+  lrnr_pkg_list <- lapply(learners, function(x) {
 
     fit_pkgs <- unique(unlist(lapply(fun_calls(x$fit), find)))
     pred_pkgs <- unique(unlist(lapply(fun_calls(x$preds), find)))
@@ -246,7 +246,7 @@ make_loss_list <- function(loss) {
 
 #' Title
 #'
-#' @param learner_list A list of learners, where each learner is specified as a list with entries name (character string), fit (function of data), and preds (function of fit and object)
+#' @param learners A list of learners, where each learner is specified as a list with entries name (character string), fit (function of data), and preds (function of fit and object)
 #' @param inner_cv Either NULL, a positive integer indicating the amount of folds, or a function of data, for construction of the superlearner.
 #' @param outer_cv Either NULL, a positive integer indicating the amount of folds, or a function of data, for validation of the superlearner on held-out folds.
 #' @param loss The loss function used to estimate weights for ensembles. Either one of 'gaussian', 'binomial', and 'poisson', or a list with functions 'loss_fun' and 'loss_fun_gradient'
@@ -261,8 +261,10 @@ make_loss_list <- function(loss) {
 #'
 #' @examples
 #' data(iris)
-learner_setup <- function(learner_list, inner_cv = 5, outer_cv = 5, loss = "gaussian",
+learner_setup <- function(learners, inner_cv = 5, outer_cv = 5, loss = "gaussian",
                           metalearners = list(mtl_selector("Selected"))) {
+
+
 
   # Extracting a function accessing the outcome
 
@@ -271,6 +273,20 @@ learner_setup <- function(learner_list, inner_cv = 5, outer_cv = 5, loss = "gaus
 
   # Generate weight-creating metalearning function depending on input
   # An AUC-based metalearner might be a nice addition for the future
+
+  # Check that names across learners and metalearners are unique
+
+  get_lrn_names <- c(lapply(learners, function(x) x$name),
+                     lapply(metalearners, function(x) x$name))
+
+  if (length(get_lrn_names) != length(unique(get_lrn_names))) {
+    stop("Please ensure that learner names are unique.\nNames can also not be shared between learners and metalearners.")
+  }
+
+  # Ensure that no metalearner is provided if inner_cv is NULL.
+  if (is.null(inner_cv) & !is.null(metalearners)) {
+    stop("If inner_cv is NULL, metalearners also needs to be NULL.")
+  }
 
   # Create a list for the provided loss function
   if (!is.character(loss) & !is.list(loss)) {
@@ -299,11 +315,11 @@ learner_setup <- function(learner_list, inner_cv = 5, outer_cv = 5, loss = "gaus
   )
 
   # Get dependencies
-  depends_pkgs <- get_lrn_packages(learner_list = learner_list, metalearners = metalearners)
+  depends_pkgs <- get_lrn_packages(learners = learners, metalearners = metalearners)
 
   # Already save the return list, except CV
   return_list <- list(
-    learner_list = learner_list,
+    learners = learners,
     metalearners = metalearners,
     loss_fun_list = loss_fun_list,
     future_pkgs = depends_pkgs
@@ -328,9 +344,9 @@ learner_setup <- function(learner_list, inner_cv = 5, outer_cv = 5, loss = "gaus
 
 # Train ensemble nuisance
 
-train_ensemble_nuisance <- function(x, y, cv_list, metalearners, learner_list, loss_fun_list, w_tol) {
+train_ensemble_nuisance <- function(x, y, cv_list, metalearners, learners, loss_fun_list, w_tol) {
 
-  ### Fit to all existing nested folds
+  # Fit to all existing nested folds
 
   # Define a function that provides predictions
   fit_across_folds <- function(x, y, learner, folds) {
@@ -349,39 +365,31 @@ train_ensemble_nuisance <- function(x, y, cv_list, metalearners, learner_list, l
 
   # Use function across all sets of fit and prediction function couplings
   # Then save as data frame with requested learner names
-  preds_list <- lapply(learner_list, fit_across_folds, y = y, folds = cv_list, x = x)
-  names(preds_list) <- lapply(learner_list, function(x) x$name)
+  preds_list <- lapply(learners, fit_across_folds, y = y, folds = cv_list, x = x)
+  names(preds_list) <- lapply(learners, function(x) x$name)
 
-  # Apply metalearners to prediction df iteratively
+  # Apply metalearners to predictions iteratively
   wt_list <- lapply(metalearners, function(mtl) fit(mtl, y = y[sort(unlist(cv_list[[1]]))], preds_list = preds_list, loss_fun_list = loss_fun_list))
 
   return(wt_list)
 
 }
 
-
 # Function for training models after generating ensembles
-fit_ensemble <- function(x, y, cv_list, learner_list, future_pkgs) {
-
-  # Ensure that training happens on all data if no ensemble CV happens
-  if (is.null(cv_list)) {
-
-    cv_list <- list(list(training_set = 1:length(y)))
-
-  }
+fit_ensemble <- function(x, y, cv_list, learners, future_pkgs) {
 
   # Train across performance sets
   # First, define a function training all learners on a data set
-  fit_all_learns <- function(learner_list, x, y) {
+  fit_all_learns <- function(learners, x, y) {
 
-    lapply(learner_list, function(lrns) nanatools::fit(lrns, x, y))
+    lapply(learners, function(lrns) nanatools::fit(lrns, x, y))
 
   }
 
   # Then, apply learners to all training sets
   all_learned_list <- future_lapply(cv_list,
                                     function(flds) fit_all_learns(
-                                      learner_list = learner_list, x = x[flds$training_set,], y = y[flds$training_set]),
+                                      learners = learners, x = x[flds$training_set,], y = y[flds$training_set]),
                                     future.packages = future_pkgs, future.seed = TRUE
   )
 
@@ -453,63 +461,76 @@ lazy_cv <- function(x, y, init) {
 
   }
 
+  # Check that, if outer_cv is NULL, inner_cv is only of length one
+  if (is.null(init$performance_sets) & length(init$build_sets) > 1) {
+    stop("If you do not outer cross-validation, you can only provide one set of inner folds.")
+  }
+
 
   # Now create CV folds to use later
   init$cv <- create_cv_folds(x, init$inner_fold_creator, init$outer_fold_creator)
 
 
+  # Then train all ensembles iteratively
+  # If build sets are NULL, just instantiate an empty list
+
   if (is.null(init$cv$build_sets)) {
-
-    if (length(init$learner_list) > 1) {
-
-      stop("If you do not do inner CV, you can only use one learner.")
-
-    }
-
-    warning("Only one learner specified. Metalearners are ignored.")
-
-    one_vec <- c(1)
-    names(one_vec) <- init$learner_list[[1]]$name
-
-    get_all_ensembles <- future_lapply(replicate(length(init$cv$performance_sets), one_vec, simplify = FALSE),
-                                       function(x) list(Learner = x), future.seed = TRUE)
-
+    get_all_ensembles <- lapply(1:length(init$cv$performance_sets), function(x) list())
   } else {
-
-    # First, train all ensembles iteratively
     get_all_ensembles <- future_lapply(init$cv$build_sets,
                                        train_ensemble_nuisance,
                                        x = x,
                                        y = y,
-                                       learner_list = init$learner_list,
+                                       learners = init$learners,
                                        metalearners = init$metalearners,
                                        loss_fun_list = init$loss_fun_list,
                                        w_tol = init$config$w_tol,
                                        future.packages = init$future_pkgs,
                                        future.seed = TRUE
     )
-
   }
 
-  # Then, get all learners trained on outer fold training sets
+  # We want to now define an ensemble for each learner.
+  # This is kind of a fake ensemble, but allows the same machinery to predict for individual CV'd learners.
+  add_mtl_list <- vector("list", length(init$learners))
+
+  for (i in 1:length(add_mtl_list)) {
+    add_mtl_list[[i]] <- fit(nanatools::mtl_learner(init$learners[[i]]$name, i))
+  }
+
+  # Now append this
+  get_all_ensembles <- lapply(get_all_ensembles, function(x, new_lrn) c(x, new_lrn), new_lrn = add_mtl_list)
+
+
+  # Then, get all learners trained on outer fold training sets.
+  # If no outer CV, need to collect the full data from inner CV.
+  # That means: no cross-validation, just train on the full data
+
+  ensemble_cv <- ifelse(!is.null(init$cv$performance_sets), TRUE, FALSE)
+
+  if (is.null(init$cv$performance_sets)) {
+    init$cv$performance_sets <- unlist(init$cv$build_sets, recursive = FALSE)
+  }
+
   get_all_learners <- fit_ensemble(
     x,
     y,
     init$cv$performance_sets,
-    init$learner_list,
+    init$learners,
     init$future_pkgs
   )
 
-  # Some information on CV for output
-  ensemble_cv <- ifelse(!is.null(init$cv$performance_sets), TRUE, FALSE)
-
   metalearner_count <- length(init$metalearners)
+
+  if (!ensemble_cv) {
+    init$cv$performance_sets <- NULL
+  }
 
   # List with all that's needed...
   return_list <- list(
     x = x,
     y = y,
-    learners = init$learner_list,
+    learners = init$learners,
     metalearners = init$metalearners,
     metalearner_count = metalearner_count,
     loss_fun_list = init$loss_fun_list,
@@ -520,24 +541,13 @@ lazy_cv <- function(x, y, init) {
     was_cv_ensemble = ensemble_cv
   )
 
+
   # If the ensemble is cross-validated, also provide the best-performing one
-  if (ensemble_cv == TRUE & metalearner_count > 1) {
+  if (ensemble_cv == TRUE) {
 
     return_list$best_metalearner <- get_losses_across_ensembles(x, y, init$cv$performance_sets,
                                                                 get_all_learners, get_all_ensembles,
                                                                 init$loss_fun_list$loss_fun)
-
-  } else if (ensemble_cv == TRUE) return_list$best_metalearner <- names(init$metalearners)
-
-  return_list$had_metalearner <- TRUE
-
-  # Except if there is only one learner, in which case we don't really have a metalearner
-  if (length(init$learner_list) == 1) {
-
-    return_list$metalearners <- NULL
-    return_list$metalearner_count <- NULL
-    return_list$had_metalearner <- FALSE
-
   }
 
   class(return_list) <- "LazySL"

@@ -5,7 +5,7 @@
 \title{Title}
 \usage{
 learner_setup(
-  learner_list,
+  learners,
   inner_cv = 5,
   outer_cv = 5,
   loss = "gaussian",
@@ -13,7 +13,7 @@ learner_setup(
 )
 }
 \arguments{
-\item{learner_list}{A list of learners, where each learner is specified as a list with entries name (character string), fit (function of data), and preds (function of fit and object)}
+\item{learners}{A list of learners, where each learner is specified as a list with entries name (character string), fit (function of data), and preds (function of fit and object)}
 
 \item{inner_cv}{Either NULL, a positive integer indicating the amount of folds, or a function of data, for construction of the superlearner.}
 

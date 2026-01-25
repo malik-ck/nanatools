@@ -62,16 +62,16 @@ predict.LazySL <- function(object, newdata = NULL, metalearner_name = NULL, outp
     if (is.null(metalearner_name) & output_best == TRUE) {
 
       warning("No metalearner specified. Output is provided for the best metalearner.
-            If you instead want predictions from all metalearners, set output_best to FALSE.")
+            If you instead want predictions from all learners, set output_best to FALSE.")
 
       metalearner_name <- object$best_metalearner
 
     } else if (is.null(metalearner_name) & output_best == FALSE) {
 
-      warning("No metalearner specified. Output is provided for all metalearners.
+      warning("No metalearner specified. Output is provided for all learners
             If you instead want predictions from the best metalearner only and have a cross-validated ensemble, set output_best to TRUE.")
 
-      metalearner_name <- unlist(lapply(object$metalearners, function(x) x$name))
+      metalearner_name <- c(unlist(lapply(object$metalearners, function(x) x$name)), unlist(lapply(object$learners, function(x) x$name)))
 
     }
 
@@ -132,7 +132,7 @@ predict.LazySL <- function(object, newdata = NULL, metalearner_name = NULL, outp
 
   if (type == "ensemble") {
 
-    if (!is.null(ensemble_fold_id)) {
+    if (!is.null(ensemble_fold_id) & object$was_cv_ensemble == FALSE) {
 
       warning("The fold ID is not necessary for predictions that are not cross-validated. Input is ignored.")
 
@@ -148,48 +148,30 @@ predict.LazySL <- function(object, newdata = NULL, metalearner_name = NULL, outp
 
     if (is.null(ensemble_fold_id) & object$was_cv_ensemble == TRUE) {
 
-      stop("For a cross-validated ensemble, you need to provide the index for the ensemble
-         you want to use for prediction. You could instead consider re-training the
-         ensemble without cross-validation via outer_cv = NULL using the best metalearner.")
+      stop("For a cross-validated ensemble, you need to provide the index for the ensemble you want to use for prediction.\nYou could instead consider re-training the ensemble without cross-validation via outer_cv = NULL using the best metalearner.")
 
     }
 
     if (object$was_cv_ensemble == FALSE) ensemble_fold_id <- 1
 
-    if (object$had_metalearner == TRUE) {
 
-      if(!is.null(metalearner_name)) {
+    if(!is.null(metalearner_name)) {
+      if(!metalearner_name %in% c(unlist(lapply(test$metalearners, function(x) x$name)), unlist(lapply(test$learners, function(x) x$name)))) stop("Please provide a metalearner name matching an actual metalearner or learner.")
+    }
 
-        if(!metalearner_name %in% names(object$metalearners)) stop("Please provide a metalearner name matching an actual metalearner.")
+    # Some warning logic and metalearner name assignment
+    if (is.null(metalearner_name)) {
 
-      }
+      if (output_best == FALSE) {
+        warning("No metalearner specified. Output is provided for all learners.\nIf you instead want predictions from the best metalearner only and have a cross-validated ensemble, set output_best to TRUE.")
+        metalearner_name <- c(unlist(lapply(test$metalearners, function(x) x$name)), unlist(lapply(test$learners, function(x) x$name)))
 
-      if (is.null(metalearner_name) & object$metalearner_count > 1) {
-
-        # Some warning logic and metalearner name assignment
-        if (output_best == FALSE) {
-
-          warning("No metalearner specified. Output is provided for all of them.
-              If you instead want predictions from the best metalearner only and have a cross-validated ensemble, set output_best to TRUE.")
-
-          metalearner_name <- names(object$metalearners)
-
-        } else if (output_best == TRUE) {
-
-          warning("No metalearner specified. Output is provided for the best metalearner.
-              If you instead want predictions from all metalearners, set output_best to FALSE.")
-
-          metalearner_name <- object$best_metalearner
-
-        }
-
+      } else if (output_best == TRUE) {
+        warning("No metalearner specified. Output is provided for the best learner.\nIf you instead want predictions from all metalearners, set output_best to FALSE.")
+        metalearner_name <- object$best_metalearner
       }
 
     }
-
-    if (object$had_metalearner == TRUE && object$metalearner_count == 1) metalearner_name <- names(object$metalearners)[[1]]
-    if (object$had_metalearner == FALSE) metalearner_name <- names(object$ensembles[[1]])
-    if (!is.null(metalearner_name) & (object$had_metalearner  == FALSE)) warning("Metalearner name is ignored as there was no metalearner.")
 
     # Now do some predicting...
 

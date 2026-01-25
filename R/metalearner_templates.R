@@ -36,6 +36,25 @@ print.SL_Metalearner_Fitted <- function(object, ...) {
   message(cat("Metalearner with name ", object$name, ".\nHas been fitted.", sep = ""))
 }
 
+# Template to define individual learners as metalearners
+# Not exported; just used internally
+#' @export
+mtl_learner <- function(name, index_pos) {
+  get_list <- list(
+    name = name,
+    fit = function(y, preds_list, loss_fun_list) {
+      # Just return the relevant index
+      return(index_pos)
+    },
+    preds = function(object, preds) {
+      # Then output this index
+      return(as.vector(preds[[object]]))
+    }
+  )
+  class(get_list) <- "SL_Metalearner"
+  return(get_list)
+}
+
 
 # Template for selector
 #' @export
