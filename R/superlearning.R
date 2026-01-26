@@ -461,15 +461,16 @@ lazy_cv <- function(x, y, init) {
 
   }
 
-  # Check that, if outer_cv is NULL, inner_cv is only of length one
-  if (is.null(init$performance_sets) & length(init$build_sets) > 1) {
-    stop("If you do not outer cross-validation, you can only provide one set of inner folds.")
+  # Little bandaid fix here. Make sure the function is good at some point.
+  if (!is.list(init$inner_fold_creator) & !is.list(outer$inner_fold_creator)) {
+
+    # Now create CV folds to use later
+    init$cv <- create_cv_folds(x, init$inner_fold_creator, init$outer_fold_creator)
+
+  } else {
+    init$cv$build_sets <- init$inner_fold_creator
+    init$cv$performance_sets <- init$outer_fold_creator
   }
-
-
-  # Now create CV folds to use later
-  init$cv <- create_cv_folds(x, init$inner_fold_creator, init$outer_fold_creator)
-
 
   # Then train all ensembles iteratively
   # If build sets are NULL, just instantiate an empty list
