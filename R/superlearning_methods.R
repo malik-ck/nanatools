@@ -156,7 +156,7 @@ predict.LazySL <- function(object, newdata = NULL, metalearner_name = NULL, outp
 
 
     if(!is.null(metalearner_name)) {
-      if(!metalearner_name %in% c(unlist(lapply(init$metalearners, function(x) x$name)), unlist(lapply(init$learners, function(x) x$name)))) stop("Please provide a metalearner name matching an actual metalearner or learner.")
+      if(!metalearner_name %in% c(unlist(lapply(object$metalearners, function(x) x$name)), unlist(lapply(object$learners, function(x) x$name)))) stop("Please provide a metalearner name matching an actual metalearner or learner.")
     }
 
     # Some warning logic and metalearner name assignment
@@ -164,7 +164,7 @@ predict.LazySL <- function(object, newdata = NULL, metalearner_name = NULL, outp
 
       if (output_best == FALSE) {
         warning("No metalearner specified. Output is provided for all learners.\nIf you instead want predictions from the best metalearner only and have a cross-validated ensemble, set output_best to TRUE.")
-        metalearner_name <- c(unlist(lapply(init$metalearners, function(x) x$name)), unlist(lapply(init$learners, function(x) x$name)))
+        metalearner_name <- c(unlist(lapply(object$metalearners, function(x) x$name)), unlist(lapply(object$learners, function(x) x$name)))
 
       } else if (output_best == TRUE) {
         warning("No metalearner specified. Output is provided for the best learner.\nIf you instead want predictions from all metalearners, set output_best to FALSE.")
