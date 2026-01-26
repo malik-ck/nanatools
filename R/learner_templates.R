@@ -943,3 +943,78 @@ lrn_bigGlm <- function(name, family, offset = NULL, frm = NULL) {
   return(get_list)
 
 }
+
+
+# Templates for random forests via ranger
+#' @export
+#' @import ranger
+lrn_ranger <- function(name, select_vars = NULL, num.trees = 500, mtry = NULL, probability = FALSE,
+                       min.node.size = NULL, min.bucket = NULL, max.depth = NULL, splitrule = NULL) {
+
+  # Force evaluation of things to ensure they are available later...
+  force(name)
+  force(num.trees)
+  force(mtry)
+  force(probability)
+  force(min.node.size)
+  force(min.bucket)
+  force(max.depth)
+  force(splitrule)
+  force(select_vars)
+
+  fit <- function(x, y) {
+
+    # First, if select_vars is provided, subset x
+    if (!is.null(select_vars)) {
+      x <- x[,select_vars]
+    }
+
+    # Make a safe matrix if necessary
+    if (is.data.frame(x)) {
+      instr_list <- create_instruction_list(x)
+      x <- make_safe_matrix(x, instr_list)
+    } else {
+      instr_list <- "skip"
+    }
+
+    # Need a data frame for ranger
+    x_df <- data.frame(x)
+
+    # Can now fit!
+    return(list(
+      model = ranger::ranger(x = x_df, y = y, num.trees = num.trees, mtry = mtry,
+                             probability = probability, min.node.size = min.node.size,
+                             min.bucket = min.bucket, max.depth = max.depth,
+                             splitrule = splitrule),
+      instructions = instr_list
+    ))
+
+  }
+
+  preds <- function(object, data) {
+
+    # Apply instruction list if necessary
+    if (!identical(object[["instructions"]], "skip")) {
+      data <- make_safe_matrix(data, object[["instructions"]])
+    }
+
+    # Then need to coerce to data frame either way
+    data <- data.frame(data)
+
+    # Then output
+    return(as.vector(predict(object[["model"]], data = data, type = "response")$predictions))
+
+  }
+
+  get_list <- list(
+    name = name,
+    fit = fit,
+    preds = preds
+  )
+
+  class(get_list) <- "SL_Learner"
+
+  return(get_list)
+
+}
+
