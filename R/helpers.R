@@ -361,3 +361,17 @@ col_kronecker <- function(mat1, mat2 = NULL) {
   }
 
 }
+
+# To get packages a function depends on
+get_funs <- function(x) {
+  if (is.function(x)) x <- body(x)
+  if (is.name(x)) return(NULL)
+  if (is.call(x)) {
+    # The first element of a call is the function name
+    # We want that, plus anything found inside the arguments
+    f <- if (is.name(x[[1]])) as.character(x[[1]]) else NULL
+    return(unique(c(f, unlist(lapply(x, get_funs)))))
+  }
+  if (is.recursive(x)) return(unique(unlist(lapply(x, get_funs))))
+  return(NULL)
+}
