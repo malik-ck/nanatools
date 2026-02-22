@@ -169,12 +169,26 @@ create_cv_folds <- function(data, inner_cv, outer_cv) {
 
 }
 
+
+
 get_lrn_packages <- function(learners, metalearners) {
 
   lrnr_pkg_list <- lapply(learners, function(x) {
 
-    fit_pkgs <- unique(unlist(lapply(fun_calls(x$fit), find)))
-    pred_pkgs <- unique(unlist(lapply(fun_calls(x$preds), find)))
+    fit_pkgs <- unique(unlist(lapply(get_funs(x$fit), function(f) {
+      loc <- utils::getAnywhere(f)$where
+      if (is.null(loc)) return(NULL)
+      pkgs <- grep("package:|namespace:", loc, value = TRUE)
+      gsub("package:|namespace:", "", pkgs)
+    })))
+
+
+    pred_pkgs <- unique(unlist(lapply(get_funs(x$preds), function(f) {
+      loc <- utils::getAnywhere(f)$where
+      if (is.null(loc)) return(NULL)
+      pkgs <- grep("package:|namespace:", loc, value = TRUE)
+      gsub("package:|namespace:", "", pkgs)
+    })))
 
     return(c(fit_pkgs, pred_pkgs))
 
@@ -182,8 +196,20 @@ get_lrn_packages <- function(learners, metalearners) {
 
   mtl_pkg_list <- lapply(metalearners, function(x) {
 
-    fit_pkgs <- unique(unlist(lapply(fun_calls(x$fit), find)))
-    pred_pkgs <- unique(unlist(lapply(fun_calls(x$preds), find)))
+    fit_pkgs <- unique(unlist(lapply(get_funs(x$fit), function(f) {
+      loc <- utils::getAnywhere(f)$where
+      if (is.null(loc)) return(NULL)
+      pkgs <- grep("package:|namespace:", loc, value = TRUE)
+      gsub("package:|namespace:", "", pkgs)
+    })))
+
+
+    pred_pkgs <- unique(unlist(lapply(get_funs(x$preds), function(f) {
+      loc <- getAnywhere(f)$where
+      if (is.null(loc)) return(NULL)
+      pkgs <- grep("package:|namespace:", loc, value = TRUE)
+      gsub("package:|namespace:", "", pkgs)
+    })))
 
     return(c(fit_pkgs, pred_pkgs))
 
@@ -256,7 +282,6 @@ make_loss_list <- function(loss) {
 #' @import future.apply
 #' @import nloptr
 #' @import origami
-#' @import pryr
 #' @export
 #'
 #' @examples
