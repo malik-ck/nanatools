@@ -1018,3 +1018,53 @@ lrn_ranger <- function(name, select_vars = NULL, num.trees = 500, mtry = NULL, p
 
 }
 
+
+
+#' @export
+#' @import xgboost
+lrn_xgboost <- function(name, select_vars = NULL, nrounds = 200, max_depth = 3,
+                        eta = 0.1, objective = "reg:squarederror",
+                        nthread = 1, verbose = 0, lambda = 2, min_child_weight = 5) {
+  force(name)
+  force(select_vars)
+  force(nrounds)
+  force(max_depth)
+  force(eta)
+  force(objective)
+  force(nthread)
+  force(verbose)
+  force(lambda)
+  force(min_child_weight)
+
+  fit <- function(x, y) {
+    if (!is.null(select_vars)) {
+      x <- x[, select_vars]
+    }
+    if (is.data.frame(x)) {
+      instr_list <- create_instruction_list(x)
+      x <- make_safe_matrix(x, instr_list)
+    } else {
+      instr_list <- "skip"
+    }
+    dtrain <- xgboost::xgb.DMatrix(data = x, label = y)
+    model <- xgboost::xgboost(data = dtrain, nrounds = nrounds, max_depth = max_depth,
+                              eta = eta, objective = objective,
+                              nthread = nthread, verbose = verbose,
+                              lambda = lambda, min_child_weight = min_child_weight)
+    return(list(model = model, instructions = instr_list))
+  }
+
+  preds <- function(object, data) {
+    if (!identical(object[["instructions"]], "skip")) {
+      data <- make_safe_matrix(data, object[["instructions"]])
+    } else {
+      data <- as.matrix(data)
+    }
+    dtest <- xgboost::xgb.DMatrix(data = data)
+    return(as.vector(predict(object[["model"]], dtest)))
+  }
+
+  get_list <- list(name = name, fit = fit, preds = preds)
+  class(get_list) <- "SL_Learner"
+  return(get_list)
+}
