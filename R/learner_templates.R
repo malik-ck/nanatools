@@ -1046,11 +1046,10 @@ lrn_xgboost <- function(name, select_vars = NULL, nrounds = 200, max_depth = 3,
     } else {
       instr_list <- "skip"
     }
-    dtrain <- xgboost::xgb.DMatrix(data = x, label = y)
-    model <- xgboost::xgboost(data = dtrain, nrounds = nrounds, max_depth = max_depth,
-                              eta = eta, objective = objective,
-                              nthread = nthread, verbose = verbose,
-                              lambda = lambda, min_child_weight = min_child_weight)
+    model <- xgboost::xgboost(x = x, y = y, nrounds = nrounds, max_depth = max_depth,
+                              learning_rate = eta, objective = objective,
+                              nthread = nthread,
+                              reg_lambda = lambda, min_child_weight = min_child_weight)
     return(list(model = model, instructions = instr_list))
   }
 
@@ -1060,8 +1059,7 @@ lrn_xgboost <- function(name, select_vars = NULL, nrounds = 200, max_depth = 3,
     } else {
       data <- as.matrix(data)
     }
-    dtest <- xgboost::xgb.DMatrix(data = data)
-    return(as.vector(predict(object[["model"]], dtest)))
+    return(as.vector(predict(object[["model"]], newdata = data)))
   }
 
   get_list <- list(name = name, fit = fit, preds = preds)
