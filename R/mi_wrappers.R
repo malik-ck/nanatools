@@ -1,4 +1,17 @@
 
+# Wrapper helper
+# Write wrapper that separates a data set received via complete() into x and y,
+# removing variables not in var_subset
+do_cv_mi <- function(mi_df, y_name, var_subset, init, lazy_cv_fn) {
+  get_y <- mi_df[, y_name]
+  if (!is.null(var_subset)) {
+    lazy_cv_fn(x = mi_df[, colnames(mi_df) %in% var_subset, drop = FALSE], y = get_y, init)
+  } else {
+    lazy_cv_fn(x = mi_df[, -which(colnames(mi_df) == y_name), drop = FALSE], y = get_y, init)
+  }
+}
+
+
 # Wrapper for lazy_cv with multiply imputed data
 
 
@@ -32,27 +45,7 @@ lazy_cv_mi <- function(mi_data, y_name, var_subset = NULL, init, use_future_plan
   # Check that future input okay
   if (use_future_plan != TRUE & use_future_plan != FALSE) stop("Need TRUE or FALSE for use_future_plan.")
 
-  # Write wrapper that separates a data set received via complete() into x and y,
-  # removing variables not in var_subset
-  do_cv_mi <- function(mi_df, y_name, var_subset, init) {
 
-    # First extract the treatment variable
-    get_y <- mi_df[,y_name]
-
-    # Then limit the subset of variables to those in var_subset, also excluding y
-    # Can then already run the function!
-
-    if (!is.null(var_subset)) {
-
-      return(lazy_cv(x = mi_df[,colnames(mi_df) %in% var_subset, drop = FALSE], y = get_y, init))
-
-    } else {
-
-      return(lazy_cv(x = mi_df[,-which(colnames(mi_df) == y_name), drop = FALSE], y = get_y, init))
-
-    }
-
-  }
 
   # Now simply loop over the imputed data
   # To be memory-efficient, do it one-by-one
@@ -64,7 +57,7 @@ lazy_cv_mi <- function(mi_data, y_name, var_subset = NULL, init, use_future_plan
 
     for (i in 1:mi_data$m) {
 
-      results_list[[i]] <- do_cv_mi(complete(mi_data, action = i), y_name, var_subset, init)
+      results_list[[i]] <- do_cv_mi(complete(mi_data, action = i), y_name, var_subset, init, lazy_cv)
 
     }
 
@@ -79,8 +72,11 @@ lazy_cv_mi <- function(mi_data, y_name, var_subset = NULL, init, use_future_plan
 
     for (i in 1:mi_data$m) {
 
+      completed_df <- mice::complete(mi_data, action = i)
+
       futures_list[[i]] <- future::future({
-        do_cv_mi(mice::complete(mi_data, action = i), y_name, var_subset, init)
+
+        do_cv_mi(completed_df, y_name, var_subset, init, lazy_cv)
       }, seed = TRUE, packages = init$future_pkgs)
 
     }
