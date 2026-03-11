@@ -99,7 +99,7 @@ lrn_glm <- function(name, family, offset = NULL) {
         instr_list <- "skip"
       }
 
-      fd <- data.frame(y = y, x)
+      fd <- data.frame(y = y, as.data.frame(x))
 
       # Formula, maybe with offset
       if (!is.null(offset)) ofs_char <- paste("offset(",offset , ")", sep = "") else ofs_char <- character(0)
@@ -123,7 +123,7 @@ lrn_glm <- function(name, family, offset = NULL) {
       }
 
       # Then need to coerce to data frame either way
-      data <- data.frame(data)
+      data <- as.data.frame(data)
 
       # Then output
       return(as.vector(predict(object[["model"]], newdata = data, type = "response")))
@@ -163,7 +163,7 @@ lrn_gam <- function(name, family, offset = NULL, k = 10, method = "GCV.Cp", frm 
     }
 
     # Need a data frame for GAMs
-    fd <- data.frame(y = y, x)
+    fd <- data.frame(y = y, as.data.frame(x))
 
     # Now need to construct formula
     # If provided, just use provided formula
@@ -225,7 +225,7 @@ lrn_gam <- function(name, family, offset = NULL, k = 10, method = "GCV.Cp", frm 
     }
 
     # Then need to coerce to data frame either way
-    data <- data.frame(data)
+    data <- as.data.frame(data)
 
     # Then output
     return(as.vector(predict(object[["model"]], newdata = data, type = "response")))
@@ -767,7 +767,7 @@ lrn_earth <- function(name, family = NULL, offset = NULL, degree = 2,
       instr_list <- "skip"
     }
 
-    fd <- data.frame(y = y, x)
+    fd <- data.frame(y = y, as.data.frame(x))
 
     # Formula, maybe with offset
     if (!is.null(offset)) ofs_char <- paste("offset(",offset , ")", sep = "") else ofs_char <- character(0)
@@ -801,7 +801,7 @@ lrn_earth <- function(name, family = NULL, offset = NULL, degree = 2,
     }
 
     # Then need to coerce to data frame either way
-    data <- data.frame(data)
+    data <- as.data.frame(data)
 
     # Then output
     return(as.vector(predict(object[["model"]], newdata = data, type = "response")))
