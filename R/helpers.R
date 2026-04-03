@@ -32,12 +32,9 @@ tabulate(sample(1:1000, 1000, replace = TRUE))
 
 # Write a transform-type function that applies to variable names
 quick_transform <- function(data, name, replacement) {
-
   data[,name] <- replacement
   return(data)
-
 }
-
 
 # Some typechecking for fwb_tmle_bin
 typecheck_lazy_sl_tmle <- function(model_obj, metalearner_type) {
@@ -374,4 +371,9 @@ get_funs <- function(x) {
   }
   if (is.recursive(x)) return(unique(unlist(lapply(x, get_funs))))
   return(NULL)
+}
+
+# Type-agnostic y subsetter
+subset_y <- function(y, idx) {
+  if (is.null(dim(y))) y[idx] else y[idx, , drop = FALSE]
 }

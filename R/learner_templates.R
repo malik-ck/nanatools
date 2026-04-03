@@ -1,140 +1,71 @@
 
 
-# fit() and predict() generics for individual learners
-
-#' @export
-fit <- function(object, ...) {
-  UseMethod("fit")
-}
-
-#' @export
-fit.SL_Learner <- function(object, x, y, ...) {
-  copy_structure <- object
-  copy_structure$model <- object$fit(x, y)
-  class(copy_structure) <- c("SL_Learner_Fitted", "SL_Learner")
-  return(copy_structure)
-}
-
-#' @export
-predict.SL_Learner <- function(object, newdata, ...) {
-
-  stop("Please train this learner before using it for predictions.")
-
-}
-
-#' @export
-predict.SL_Learner_Fitted <- function(object, newdata, ...) {
-
-  object$preds(object$model, newdata)
-}
-
-# Also printing!
-#' @export
-print.SL_Learner <- function(object, ...) {
-
-  message(cat("Learner object with name ", object$name, ".\nNot yet fitted.", sep = ""))
-
-}
-
-#' @export
-print.SL_Learner_Fitted <- function(object, ...) {
-
-  message(cat("Learner object with name ", object$name, ".\nHas been fitted.", sep = ""))
-}
-
-
-# Write a constructor for valid learner objects
-# Still big work in progress
-#' @export
-lrn_custom <- function(name, fit, preds) {
-
-  get_list <- list(
-    name = name,
-    fit = fit,
-    preds = preds
-  )
-
-  class(get_list) <- "SL_Learner"
-
-  return(get_list)
-
-}
-
 # Template for empirical mean
 #' @export
-lrn_mean <- function(name) {
-
-  force(name)
-
-  get_list <- list(
-    name = name,
-    fit = function(x, y) mean(y),
-    preds = function(object, data) rep(object, nrow(data))
-  )
-
-  class(get_list) <- "SL_Learner"
-
-  return(get_list)
-
-}
+lrn_mean <- lrn_custom(
+  fit = function(x, y) mean(y),
+  preds = function(object, data) rep(object, nrow(data))
+)
 
 # Template for GLM
 #' @export
 lrn_glm <- function(name, family, offset = NULL) {
 
-  if (missing(family)) stop("Please explicitly specify a family object for glm.")
+  if (missing(family)) {
+    stop(
+      "Argument 'family' is missing. You need to specify a family object ",
+      "(e.g., gaussian()), or use family = 'auto' to let the learner guess.",
+      call. = FALSE
+    )
+  }
 
-  force(name)
-  force(family)
-  force(offset)
+  return(
+    lrn_custom(
+      fit = function(x, y, family, offset, ...) {
 
-  get_list <- list(
-    name = name,
-    fit = function(x, y) {
+        if (identical(family, "auto")) family <- family_guesser(y)
 
-      if (is.data.frame(x)) {
-        instr_list <- create_instruction_list(x)
-        x <- make_safe_matrix(x, instr_list)
-      } else {
-        instr_list <- "skip"
-      }
+        if (is.data.frame(x)) {
+          instr_list <- create_instruction_list(x)
+          x <- make_safe_matrix(x, instr_list)
+        } else {
+          instr_list <- "skip"
+        }
 
-      fd <- data.frame(y = y, x)
+        fd <- data.frame(y = y, x)
 
-      # Formula, maybe with offset
-      if (!is.null(offset)) ofs_char <- paste("offset(",offset , ")", sep = "") else ofs_char <- character(0)
-      offset_col <- which(colnames(fd) == offset)
-      get_frm <- paste0("y ~ ", paste(c(ofs_char, colnames(fd)[-c(1, offset_col)]), collapse = " + "))
+        # Formula logic
+        if (!is.null(offset)) {
+          # Ensure offset is handled as a character string for the formula
+          ofs_char <- paste0("offset(", offset, ")")
+          offset_col <- which(colnames(fd) == offset)
+          # Remove y and the offset column from predictors
+          predictors <- colnames(fd)[-c(1, offset_col)]
+        } else {
+          ofs_char <- character(0)
+          predictors <- colnames(fd)[-1]
+        }
 
-      get_model <- stats::glm(get_frm, family = family, data = fd)
+        get_frm <- as.formula(
+          paste0("y ~ ", paste(c(ofs_char, predictors), collapse = " + "))
+        )
 
-      # Return explicitly with instruction list if needed
-      return(list(
-        model = get_model,
-        instructions = instr_list
-      ))
+        get_model <- stats::glm(get_frm, family = family, data = fd)
 
-    },
-    preds = function(object, data) {
+        return(list(model = get_model, instructions = instr_list))
+      },
 
-      # Apply instruction list if necessary
-      if (!identical(object[["instructions"]], "skip")) {
-        data <- make_safe_matrix(data, object[["instructions"]])
-      }
-
-      # Then need to coerce to data frame either way
-      data <- data.frame(data)
-
-      # Then output
-      return(as.vector(predict(object[["model"]], newdata = data, type = "response")))
-
-    }
+      preds = function(object, data, ...) {
+        if (!identical(object[["instructions"]], "skip")) {
+          data <- make_safe_matrix(data, object[["instructions"]])
+        }
+        data <- data.frame(data)
+        return(as.vector(predict(object[["model"]], newdata = data, type = "response")))
+      },
+      family,
+      offset
+    )(name = name, family = family, offset = offset)
   )
-
-  class(get_list) <- "SL_Learner"
-
-  return(get_list)
-
 }
 
 
@@ -143,7 +74,13 @@ lrn_glm <- function(name, family, offset = NULL) {
 #' @import mgcv
 lrn_gam <- function(name, family, offset = NULL, k = 10, method = "GCV.Cp", frm = NULL, smoother = "tp") {
 
-  if (missing(family)) stop("Please explicitly specify a family object for glm.")
+  if (missing(family)) {
+    stop(
+      "Argument 'family' is missing. You need to specify a family object ",
+      "(e.g., gaussian()), or use family = 'auto' to let the learner guess.",
+      call. = FALSE
+    )
+  }
 
   # Force evaluation of things to ensure they are available later...
   force(name)
@@ -153,6 +90,8 @@ lrn_gam <- function(name, family, offset = NULL, k = 10, method = "GCV.Cp", frm 
   force(smoother)
 
   fit <- function(x, y) {
+
+    if (identical(family, "auto")) family <- family_guesser(y)
 
     # Make a safe matrix if necessary and no formula provided
     if (is.data.frame(x) & is.null(frm)) {
@@ -250,9 +189,13 @@ lrn_gam <- function(name, family, offset = NULL, k = 10, method = "GCV.Cp", frm 
 #' @import mboost
 lrn_mboost <- function(name, family, offset = NULL, mstop = 100, nu = 0.1, frm = NULL, max_df = 5, knots = 20, df_factor = 0.99) {
 
-  if (missing(family)) stop("Please explicitly specify a family object for glm.")
+  if (missing(family)) {
+    stop(
+      "Argument 'family' is missing. You need to specify a family object. There is no 'auto' for mboost, which has custom families.",
+      call. = FALSE
+    )
+  }
 
-  # Force evaluation of things to ensure they are available later...
   force(name)
   force(family)
   force(offset)
@@ -271,6 +214,11 @@ lrn_mboost <- function(name, family, offset = NULL, mstop = 100, nu = 0.1, frm =
       x <- make_safe_matrix(x, instr_list)
     } else {
       instr_list <- "skip"
+    }
+
+    # Check y and family
+    if (!is.factor(y) && identical(family@name, mboost::Binomial()@name)) {
+      stop("For binary regression, mboost expects 'Binomial(type = 'glm')' for family. With 'Binomial()' it defaults to adaboost and fails on numeric y.")
     }
 
     # Need a data frame for Mboost
@@ -366,7 +314,13 @@ lrn_mboost <- function(name, family, offset = NULL, mstop = 100, nu = 0.1, frm =
 lrn_hal <- function(name, family, offset = NULL, frm = NULL, max_degree = 2,
                     smoothness_orders = 1, num_knots = 50) {
 
-  if (missing(family)) stop("Please explicitly specify a family object for glmnet.")
+  if (missing(family)) {
+    stop(
+      "Argument 'family' is missing. You need to specify a family object ",
+      "(e.g., gaussian()), or use family = 'auto' to let the learner guess.",
+      call. = FALSE
+    )
+  }
 
   # Some checks ensuring there are integers where necessary
   integer_checker(max_degree, "the interaction degree.")
@@ -381,6 +335,8 @@ lrn_hal <- function(name, family, offset = NULL, frm = NULL, max_degree = 2,
   force(smoothness_orders)
 
   fit <- function(x, y) {
+
+    if (identical(family, "auto")) family <- family_guesser(y)
 
     # If there is an offset, retrieve as variable and remove from data
     if (!is.null(offset)) {
@@ -497,7 +453,13 @@ lrn_hal <- function(name, family, offset = NULL, frm = NULL, max_degree = 2,
 lrn_cv_glmnet <- function(name, family, offset = NULL, frm = NULL, alpha = 1, nfolds = 10, nlambda = 100,
                           type_lambda = "lambda.min", tpb_knots = NULL, create_interactions = NULL) {
 
-  if (missing(family)) stop("Please explicitly specify a family object for glmnet.")
+  if (missing(family)) {
+    stop(
+      "Argument 'family' is missing. You need to specify a family object ",
+      "(e.g., gaussian()), or use family = 'auto' to let the learner guess.",
+      call. = FALSE
+    )
+  }
 
   # Some checks ensuring there are integers where necessary
   integer_checker(nfolds, "the number of folds.")
@@ -523,6 +485,8 @@ lrn_cv_glmnet <- function(name, family, offset = NULL, frm = NULL, alpha = 1, nf
   force(type_lambda)
 
   fit <- function(x, y) {
+
+    if (identical(family, "auto")) family <- family_guesser(y)
 
     # If there is an offset, retrieve as variable and remove from data
     if (!is.null(offset)) {
@@ -732,11 +696,17 @@ lrn_cv_glmnet <- function(name, family, offset = NULL, frm = NULL, alpha = 1, nf
 # Templates for multivariate adaptive regression splines.
 #' @export
 #' @import earth
-lrn_earth <- function(name, family = NULL, offset = NULL, degree = 2,
+lrn_earth <- function(name, family, offset = NULL, degree = 2,
                       penalty = 3, nk = 100,
                       thresh = 0.01, pmethod = "backward", nfold = 0) {
 
-  if (missing(family)) stop("Please explicitly specify a family object for earth.")
+  if (missing(family)) {
+    stop(
+      "Argument 'family' is missing. You need to specify a family object ",
+      "(e.g., gaussian()), or use family = 'auto' to let the learner guess. For 'earth', family can be NULL for a normal model.",
+      call. = FALSE
+    )
+  }
 
   # Some checks ensuring there are integers where necessary
   integer_checker(degree, "the interaction degree (1 = additive model).")
@@ -757,7 +727,7 @@ lrn_earth <- function(name, family = NULL, offset = NULL, degree = 2,
 
   fit <- function(x, y) {
 
-    if (is.null(family)) warning("No family specified for earth. Will estimate a (standard) normal model.")
+    if (identical(family, "auto")) family <- family_guesser(y)
 
     # Very similar to how I did it for GLMs, actually!
     if (is.data.frame(x)) {
@@ -825,7 +795,13 @@ lrn_earth <- function(name, family = NULL, offset = NULL, degree = 2,
 #' @export
 lrn_bigGlm <- function(name, family, offset = NULL, frm = NULL) {
 
-  if (missing(family)) stop("Please explicitly specify a family object for bigGlm.")
+  if (missing(family)) {
+    stop(
+      "Argument 'family' is missing. You need to specify a family object ",
+      "(e.g., gaussian()), or use family = 'auto' to let the learner guess.",
+      call. = FALSE
+    )
+  }
 
   # Force evaluation of things to ensure they are available later...
   force(name)
@@ -834,6 +810,8 @@ lrn_bigGlm <- function(name, family, offset = NULL, frm = NULL) {
   force(family)
 
   fit <- function(x, y) {
+
+    if (identical(family, "auto")) family <- family_guesser(y)
 
     # If there is an offset, retrieve as variable and remove from data
     if (!is.null(offset)) {
@@ -1066,3 +1044,51 @@ lrn_xgboost <- function(name, select_vars = NULL, nrounds = 200, max_depth = 3,
   class(get_list) <- "SL_Learner"
   return(get_list)
 }
+
+
+# Learner grid maker for CV
+#' @export
+lrn_grid <- function(name_prefix, learner, ...) {
+
+  # Create the hyperparameter grid
+  grid <- expand.grid(..., stringsAsFactors = FALSE)
+
+  # Generate names by adding hyperparameter combinations as suffix
+  grid_names <- apply(grid, 1, function(row) {
+    param_combos <- paste0(names(row), row)
+    paste0(name_prefix, "_", paste(param_combos, collapse = "_"))
+  })
+
+  # Add name to the grid
+  grid$name <- grid_names
+
+  # Create each learner
+  learners <- do.call(Map, c(f = learner, as.list(grid)))
+  learners
+}
+
+# Family guesser so that family can be auto
+family_guesser <- function(y) {
+  unique_vals <- unique(y)
+
+  # Binary (Strictly 0 and 1)
+  if (length(unique_vals) == 2 && all(unique_vals %in% c(0, 1))) {
+    return(stats::binomial())
+  }
+
+  # Proportions (between 0 and 1, but not strictly binary)
+  if (all(y >= 0 & y <= 1)) {
+    return(stats::quasibinomial())
+  }
+
+  # 3. Counts (non-negative Integers)
+  if (all(y >= 0) && all(y == floor(y))) {
+    return(stats::poisson())
+  }
+
+  # Anything else
+  return(stats::gaussian())
+}
+
+# Learner for bam, which are fast GAMs
+lrn_bam <- list()

@@ -8,313 +8,285 @@ loss <- function(obj, ...) {
   UseMethod("loss")
 }
 
-#' Caulculate marginal effects after superlearning.
+# ── Internal helpers ───────────────────────────────────────────────────────
+
+# Build a named preds_list from fitted learners for a given newdata block
+make_preds_list <- function(fit_objects_fold, newdata) {
+  preds <- lapply(fit_objects_fold, function(lrn)
+    predict(lrn, newdata = newdata)
+  )
+  names(preds) <- vapply(fit_objects_fold, `[[`, character(1L), "name")
+  preds
+}
+
+# Apply one named metalearner from a fold's ensemble list to a preds_list
+apply_metalearner <- function(ensembles_fold, mtl_name, preds_list) {
+  mtl_names <- vapply(ensembles_fold, `[[`, character(1L), "name")
+  mtl_pos   <- which(mtl_names == mtl_name)
+  if (length(mtl_pos) == 0L)
+    stop(sprintf("Metalearner '%s' not found in this fold's ensembles.\nAvailable: %s",
+                 mtl_name, paste(mtl_names, collapse = ", ")))
+  predict(ensembles_fold[[mtl_pos]], preds_list)
+}
+
+# Resolve which metalearner names to use given user input and object state
+resolve_metalearner_names <- function(object, metalearner_name, output_best) {
+  all_mtl_names <- vapply(object$metalearners, `[[`, character(1L), "name")
+  all_lrn_names <- vapply(object$learners,     `[[`, character(1L), "name")
+  all_names     <- c(all_mtl_names, all_lrn_names)
+
+  if (!is.null(metalearner_name)) {
+    if (output_best)
+      warning("`output_best` is ignored when `metalearner_name` is explicitly provided.")
+    bad <- setdiff(metalearner_name, all_names)
+    if (length(bad))
+      stop(sprintf(
+        "Metalearner name(s) not found: %s\nAvailable: %s",
+        paste(bad, collapse = ", "),
+        paste(all_names, collapse = ", ")
+      ))
+    return(metalearner_name)
+  }
+
+  if (output_best) {
+    if (is.null(object$best_metalearner))
+      stop(paste0("No best metalearner stored. Ensure the object was fitted ",
+                  "with outer CV (`was_cv_ensemble = TRUE`)."))
+    return(object$best_metalearner)
+  }
+
+  # Default: all metalearners and individual learners
+  all_names
+}
+
+
+# ── predict.Ensemble ─────────────────────────────────────────────────────────
+
+#' Predict from a fitted SuperLearner
 #'
-#' @param obj An object of class lazycv.
-#' @param ... Further arguments.
+#' @param object A fitted \code{Ensemble} object.
+#' @param newdata New predictor data. For \code{type = "cv"}, defaults to the
+#'   stored training data and predictions are generated on each outer fold's
+#'   validation set. For \code{type = "ensemble"}, predictions are generated
+#'   on the full \code{newdata}.
+#' @param metalearner_name Character vector of metalearner (or learner) names
+#'   to return predictions for. If \code{NULL} and \code{output_best = FALSE},
+#'   all metalearners and learners are returned.
+#' @param output_best Logical. If \code{TRUE} and \code{metalearner_name} is
+#'   \code{NULL}, returns only the best-performing metalearner. Requires outer
+#'   CV.
+#' @param ensemble_fold_id Integer. For \code{type = "ensemble"} with outer CV,
+#'   selects which fold's fitted ensemble to use for prediction.
+#' @param type Character. One of \code{"cv"} or \code{"ensemble"}.
+#' @param ... Ignored.
+#' @return For a single metalearner: a prediction object of the type returned
+#'   by that learner, with an \code{indices} attribute for \code{type = "cv"}.
+#'   For multiple metalearners: a named list of such objects.
 #' @export
-marginals <- function(obj, ...) {
-  UseMethod("marginals")
-}
+predict.Ensemble <- function(object,
+                           newdata          = NULL,
+                           metalearner_name = NULL,
+                           output_best      = FALSE,
+                           ensemble_fold_id = NULL,
+                           type             = NULL,
+                           ...) {
 
-#' @export
-predict.LazySL <- function(object, newdata = NULL, metalearner_name = NULL, output_best = FALSE, ensemble_fold_id = NULL, type = NULL) {
+  # ── Validate type ──────────────────────────────────────────────────────────
+  if (is.null(type))
+    stop("Please provide `type`: 'cv' for cross-validated predictions or 'ensemble' for ensemble predictions.")
+  type <- match.arg(type, c("cv", "ensemble"))
 
-  # Small starting type checks
-  if (is.null(type)) {
+  # ── Resolve metalearner names ──────────────────────────────────────────────
+  use_names <- resolve_metalearner_names(object, metalearner_name, output_best)
 
-    stop("Please provide a valid option for the type of prediction: cv for cross-validated predictions on (usually) the original observations,
-         ensemble for predictions using one ensemble.")
-
-  }
-
-  if (!type %in% c("cv", "ensemble")) {
-
-    stop("Please provide a valid option for the type of prediction: cv for cross-validated predictions on (usually) the original observations,
-         ensemble for predictions using one ensemble.")
-
-  }
-
+  # ══════════════════════════════════════════════════════════════════════════
+  # type = "cv": predict on validation sets of the original outer folds
+  # ══════════════════════════════════════════════════════════════════════════
   if (type == "cv") {
 
-    # CV predictions only make sense for validated ensembles
-    if (object$was_cv_ensemble == FALSE) {
+    if (!object$was_cv_ensemble)
+      stop(paste0("Cross-validated predictions require outer CV. ",
+                  "Refit with a non-NULL `outer_cv`."))
 
-      stop("Cross-validated predictions can only be used for cross-validated ensembles
-         (i.e., with outer_cv not NULL).")
-
+    if (is.null(newdata)) {
+      if (is.null(object$x))
+        stop(paste0("No data stored in object. ",
+                    "Refit with `return_data = TRUE` or supply `newdata`."))
+      newdata <- object$x
+    } else {
+      if (!is.null(dim(newdata)) && !is.null(dim(object$x)))
+        if (ncol(newdata) != ncol(object$x))
+          stop("ncol(newdata) must match ncol of the training data.")
     }
 
-    if (is.null(newdata)) newdata <- object$x
+    perf_folds <- object$cv$performance_sets
+    n_folds    <- length(perf_folds)
 
-    # If someone provided new data, ensure that its number of columns matches
-    # that of the original data set
-    if (ncol(object$x) != ncol(newdata)) {
+    # For each requested metalearner, collect predictions across outer folds
+    result <- lapply(use_names, function(nm) {
 
-      stop("Please ensure that newdata has the same number of columns as training data.")
+      chunks <- lapply(seq_len(n_folds), function(i) {
+        val        <- validation_set(perf_folds[[i]])
+        preds_list <- make_preds_list(object$fit_objects[[i]],
+                                      newdata[val, , drop = FALSE])
+        preds      <- apply_metalearner(object$ensembles[[i]], nm, preds_list)
+        list(idx = val, preds = preds)
+      })
 
+      all_idx   <- unlist(lapply(chunks, `[[`, "idx"))
+      all_preds <- combine_preds(lapply(chunks, `[[`, "preds"))
+      sort_ord  <- order(all_idx)
+
+      sorted_preds <- if (is.data.frame(all_preds) || is.matrix(all_preds))
+        all_preds[sort_ord, , drop = FALSE]
+      else
+        all_preds[sort_ord]
+
+      structure(sorted_preds, indices = all_idx[sort_ord])
+    })
+    names(result) <- use_names
+
+    if (length(result) == 1L) return(result[[1L]])
+    return(result)
+  }
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # type = "ensemble": predict on newdata using a specific fitted ensemble
+  # ══════════════════════════════════════════════════════════════════════════
+  if (type == "ensemble") {
+
+    if (!is.null(ensemble_fold_id) && !object$was_cv_ensemble)
+      warning("`ensemble_fold_id` is ignored for non-cross-validated objects.")
+
+    if (object$was_cv_ensemble && is.null(ensemble_fold_id))
+      stop(paste0(
+        "For a cross-validated object, provide `ensemble_fold_id` to select ",
+        "which fold's ensemble to use.\n",
+        "Consider refitting without outer CV using only the best metalearner ",
+        "for a single production ensemble."
+      ))
+
+    if (!object$was_cv_ensemble)
+      ensemble_fold_id <- 1L
+
+    if (is.null(newdata)) {
+      if (is.null(object$x))
+        stop(paste0("No data stored in object. ",
+                    "Refit with `return_data = TRUE` or supply `newdata`."))
+      newdata <- object$x
     }
 
-    if (!is.null(metalearner_name)) {
-      warning("Metalearner name provided. Option for output_best is ignored.")
-    }
+    preds_list <- make_preds_list(object$fit_objects[[ensemble_fold_id]], newdata)
 
-    if (is.null(metalearner_name) & output_best == TRUE) {
-
-      warning("No metalearner specified. Output is provided for the best metalearner.
-            If you instead want predictions from all learners, set output_best to FALSE.")
-
-      metalearner_name <- object$best_metalearner
-
-    } else if (is.null(metalearner_name) & output_best == FALSE) {
-
-      warning("No metalearner specified. Output is provided for all learners
-            If you instead want predictions from the best metalearner only and have a cross-validated ensemble, set output_best to TRUE.")
-
-      metalearner_name <- c(unlist(lapply(object$metalearners, function(x) x$name)), unlist(lapply(object$learners, function(x) x$name)))
-
-    }
-
-    # Write a function that predicts for one set of folds
-    predict_one_fold <- function(ensemble, metalearner, validation_set, newdata = NULL) {
-
-      # Get learner outputs into a list
-      preds_list <- vector("list", length(ensemble))
-
-      for (i in 1:length(ensemble)) preds_list[[i]] <- predict(ensemble[[i]], newdata = newdata)
-
-      # Now apply metalearner to that list
-      preds_vec <- predict(metalearner, preds_list)
-
-      return_matrix <- cbind(index = validation_set, preds = preds_vec)
-      colnames(return_matrix) <- c("index", "preds")
-
-      return(return_matrix)
-
-    }
-
-    # Run this function across all folds
-    pred_list <- vector("list", length(object$cv$performance_sets))
-
-    for (i in 1:length(pred_list)) {
-
-      current_validation_set <- object$cv$performance_sets[[i]]$validation_set
-
-      # Get relevant subset of fitted metalearners
-      metalearner_subset <- object$ensembles[[i]][lapply(object$ensembles[[i]], function(x) x$name) %in% metalearner_name]
-
-      pred_list[[i]] <- lapply(metalearner_subset, predict_one_fold,
-                               ensemble = object$fit_objects[[i]], validation_set = current_validation_set,
-                               newdata = newdata[current_validation_set,])
-
-      names(pred_list[[i]]) <- metalearner_name
-
-    }
-
-    wrangled_preds <- lapply(metalearner_name,
-                             function(x) lapply(pred_list, function(y) y[[x]])
+    result <- lapply(use_names, function(nm)
+      apply_metalearner(object$ensembles[[ensemble_fold_id]], nm, preds_list)
     )
+    names(result) <- use_names
 
-    names(wrangled_preds) <- metalearner_name
-
-    combined_preds <- lapply(wrangled_preds, function(x) do.call("rbind", x))
-    names(combined_preds) <- metalearner_name
-
-    sorted_preds <- lapply(combined_preds, function(x) x[order(x[,"index"]),])
-
-    final_preds <- lapply(sorted_preds, function(x) x[,"preds"])
-
-    if (length(metalearner_name) == 1) final_preds <- unname(unlist(final_preds))
-
-    return(final_preds)
-
+    if (length(result) == 1L) return(result[[1L]])
+    return(result)
   }
-
-  if (type == "ensemble") {
-
-    if (!is.null(ensemble_fold_id) & object$was_cv_ensemble == FALSE) {
-
-      warning("The fold ID is not necessary for predictions that are not cross-validated. Input is ignored.")
-
-    }
-
-    # Set newdata to be saved x if newdata is NULL
-    if (is.null(newdata)) newdata <- object$x
-
-    # Do some checks
-    if (object$was_cv_ensemble == FALSE & output_best == TRUE) {
-      stop("Please cross-validate your ensemble to be able to set output_best to TRUE.")
-    }
-
-    if (is.null(ensemble_fold_id) & object$was_cv_ensemble == TRUE) {
-
-      stop("For a cross-validated ensemble, you need to provide the index for the ensemble you want to use for prediction.\nYou could instead consider re-training the ensemble without cross-validation via outer_cv = NULL using the best metalearner.")
-
-    }
-
-    if (object$was_cv_ensemble == FALSE) ensemble_fold_id <- 1
-
-
-    if(!is.null(metalearner_name)) {
-      if(!metalearner_name %in% c(unlist(lapply(object$metalearners, function(x) x$name)), unlist(lapply(object$learners, function(x) x$name)))) stop("Please provide a metalearner name matching an actual metalearner or learner.")
-    }
-
-    # Some warning logic and metalearner name assignment
-    if (is.null(metalearner_name)) {
-
-      if (output_best == FALSE) {
-        warning("No metalearner specified. Output is provided for all learners.\nIf you instead want predictions from the best metalearner only and have a cross-validated ensemble, set output_best to TRUE.")
-        metalearner_name <- c(unlist(lapply(object$metalearners, function(x) x$name)), unlist(lapply(object$learners, function(x) x$name)))
-
-      } else if (output_best == TRUE) {
-        warning("No metalearner specified. Output is provided for the best learner.\nIf you instead want predictions from all metalearners, set output_best to FALSE.")
-        metalearner_name <- object$best_metalearner
-      }
-
-    }
-
-    # Now do some predicting...
-
-    pred_engine <- function(metalearner_name, newdata, list_obj, ensemble_fold_id) {
-
-      # Get learner outputs into a list
-      preds_list <- vector("list", length(list_obj$learners))
-
-      for (i in 1:length(list_obj$learners)) preds_list[[i]] <- predict(list_obj$fit_objects[[ensemble_fold_id]][[i]], newdata)
-
-      # Get position of metalearner we want
-      mtl_pos <- which(unlist(lapply(list_obj$ensembles[[ensemble_fold_id]], function(x) x$name)) == metalearner_name)
-
-      # Now apply that metalearner to our prediction list
-      preds_vec <- predict(list_obj$ensembles[[ensemble_fold_id]][[mtl_pos]], preds_list)
-      names(preds_vec) <- NULL
-
-      return(preds_vec)
-
-    }
-
-    return_list <- lapply(metalearner_name, function(x) pred_engine(metalearner_name = x, newdata = newdata, list_obj = object, ensemble_fold_id = ensemble_fold_id))
-
-    if(length(return_list) == 1) return_list <- unlist(return_list) else names(return_list) <- metalearner_name
-
-    # Now do some adjustments in case we set output_best to TRUE:
-    if (is.list(return_list) & output_best == TRUE) {
-
-
-
-    }
-
-    return(return_list)
-
-  }
-
-
 }
 
 
+# ── loss.Ensemble ────────────────────────────────────────────────────────────
 
-### Now losses
-
+#' Compute loss for a fitted SuperLearner
+#'
+#' @param object A fitted \code{Ensemble} object.
+#' @param newdata Optional new predictor data. Defaults to stored training
+#'   data. For \code{type = "cv"}, applied fold-wise to validation sets.
+#' @param loss_fun_list Optional \code{mtl_loss} object. Defaults to the loss
+#'   used during fitting.
+#' @param ensemble_fold_id Integer. For \code{type = "ensemble"} with outer
+#'   CV, selects which fold's ensemble to evaluate.
+#' @param type Character. One of \code{"cv"} or \code{"ensemble"}.
+#' @param ... Ignored.
+#' @return A named numeric vector of mean losses, one per metalearner.
 #' @export
-loss.LazySL <- function(object, newdata = NULL, ensemble_fold_id = NULL, type = NULL) {
+loss.Ensemble <- function(object,
+                        newdata          = NULL,
+                        loss_fun_list    = NULL,
+                        ensemble_fold_id = NULL,
+                        type             = NULL,
+                        ...) {
 
-  # Small starting type checks
-  if (is.null(type)) {
+  # ── Validate type ──────────────────────────────────────────────────────────
+  if (is.null(type))
+    stop("Please provide `type`: 'cv' or 'ensemble'.")
+  type <- match.arg(type, c("cv", "ensemble"))
 
-    stop("Please provide a valid option for the type of prediction: cv for cross-validated predictions on (usually) the original observations,
-         ensemble for predictions using one ensemble.")
-
+  # ── Resolve loss function ──────────────────────────────────────────────────
+  if (is.null(loss_fun_list)) {
+    loss_fun_list <- object$loss_fun_list
+  } else {
+    if (!inherits(loss_fun_list, "mtl_loss"))
+      stop("`loss_fun_list` must be of class 'mtl_loss'.\n",
+           "You can specify a custom loss function via 'loss_custom'. Example: loss_custom(function(y, y_hat) abs(y - y_hat)).")
   }
 
-  if (!type %in% c("cv", "ensemble")) {
+  # ── Resolve y ─────────────────────────────────────────────────────────────
+  if (is.null(object$y))
+    stop(paste0("No outcome stored in object. ",
+                "Refit with `return_data = TRUE` to enable loss computation."))
+  y <- object$y
 
-    stop("Please provide a valid option for the type of prediction: cv for cross-validated predictions on (usually) the original observations,
-         ensemble for predictions using one ensemble.")
+  # ── Get predictions for all metalearners ──────────────────────────────────
+  # Always request all metalearners so we return a complete loss table
+  all_names <- c(
+    vapply(object$metalearners, `[[`, character(1L), "name"),
+    vapply(object$learners,     `[[`, character(1L), "name")
+  )
 
-  }
+  get_preds <- suppressWarnings(predict(
+    object           = object,
+    newdata          = newdata,
+    metalearner_name = all_names,
+    output_best      = FALSE,
+    ensemble_fold_id = ensemble_fold_id,
+    type             = type
+  ))
 
+  # predict() returns a named list when multiple metalearners are requested
+  # Wrap in list if somehow a single object slipped through
+  if (!is.list(get_preds) || !is.null(attr(get_preds, "indices")))
+    get_preds <- setNames(list(get_preds), all_names[[1L]])
 
-  if (type == "cv") {
-
-    get_preds <- suppressWarnings(predict(object = object, newdata = newdata, type = "cv",
-                                          metalearner_name = NULL, output_best = FALSE))
-
-    loss_out <- lapply(get_preds, object$loss_fun_list$loss_fun, y = object$y)
-
-
-    return(unlist(loss_out))
-
-  }
-
-  if (type == "ensemble") {
-
-    if (!is.null(ensemble_fold_id)) {
-
-      warning("The fold ID is not necessary for losses that are not cross-validated. Input is ignored.")
-
-    }
-
-    get_preds <- suppressWarnings(predict(object = object, newdata = newdata, metalearner_name = NULL, type = "ensemble",
-                                          ensemble_fold_id = ensemble_fold_id, output_best = FALSE))
-
-    loss_out <- lapply(get_preds, object$loss_fun_list$loss_fun, y = object$y)
-
-
-    return(unlist(loss_out))
-
-  }
-
-
-}
-
-#' @export
-marginals.LazySL <- function(obj, subset = NULL, metalearner_name, type = "ensemble", h = NULL) {
-
-  data <- obj$x
-
-  if (is.null(subset)) subset <- colnames(data) else subset <- subset
-
-  estimate_list <- rep(NA, length(subset))
-
-  for (i in 1:length(subset)) {
-
-    if (length(unique(data[,subset[[i]]])) == 2) step_size <- ifelse(data[,subset[[i]]] == 1, -1, 1) else {
-
-      if (is.null(h)) step_size <- abs(diff(range(data[,subset[[i]]])))/10000 else step_size = h
-
-    }
-
-    # Get original data back, change data copy variable by step size
-    data_copy <- data
-    data_copy[,subset[[i]]] <- data_copy[,subset[[i]]] + step_size
-
-    first_preds <- predict(obj, metalearner_name = metalearner_name, type = type)
-
-    diff_preds <- predict(obj, newdata = data_copy, metalearner_name = metalearner_name, type = type)
-
-    estimate_list[[i]] <- mean((diff_preds - first_preds) / step_size)
-
-  }
-
-  return(data.frame(term = subset, estimate = unlist(estimate_list)))
-
-
+  # ── Compute mean loss per metalearner ──────────────────────────────────────
+  # For cv type, predictions have an indices attribute — subset y accordingly
+  vapply(names(get_preds), function(nm) {
+    preds <- get_preds[[nm]]
+    idx   <- attr(preds, "indices")
+    y_use <- if (!is.null(idx)) subset_y(y, idx) else y
+    mean(loss_fun_list$loss_fun(y_use, preds))
+  }, numeric(1L))
 }
 
 
+# ── print.Ensemble ───────────────────────────────────────────────────────────
+
 #' @export
-print.LazySL <- function(object) {
+print.Ensemble <- function(object, ...) {
+  cv_word <- if (object$was_cv_ensemble)
+    sprintf("Cross-validated across %d outer fold(s).",
+            length(object$cv$performance_sets))
+  else
+    "Not cross-validated."
 
-  if (object$was_cv_ensemble == TRUE) {
-    has_cv_word <- paste0("Has been cross-validated across ", length(object$cv$performance_sets), " folds.")
-  } else has_cv_word <- "Has not been cross-validated."
+  n_build <- if (!is.null(object$cv$build_sets))
+    length(object$cv$build_sets[[1L]])
+  else
+    0L
 
-  cat("A superlearning object with:\n\n")
+  cat("── Ensemble ", paste(rep("\u2500", 38), collapse = ""), "\n", sep = "")
+  cat(sprintf("  Learners     : %d\n", length(object$learners)))
+  cat(sprintf("  Metalearners : %d\n", length(object$metalearners)))
+  cat(sprintf("  Inner folds  : %d\n", n_build))
+  cat(sprintf("  %s\n", cv_word))
 
-  cat(length(object$learners), "learner(s)\n")
+  if (!is.null(object$best_metalearner))
+    cat(sprintf("  Best         : %s\n", object$best_metalearner))
 
-  cat(length(object$metalearners), "ensemble(s)\n\n")
-
-  cat(has_cv_word)
-
+  cat(paste(rep("\u2500", 50), collapse = ""), "\n")
+  invisible(object)
 }
