@@ -2,17 +2,20 @@
 % Please edit documentation in R/ensemble_pipelines.R
 \name{collect_learners}
 \alias{collect_learners}
-\title{Collect individual learners and pipelines in a \code{train_ensemble}-friendly format.}
+\title{Collect learners and pipelines into a setup-ready format}
 \usage{
 collect_learners(...)
 }
 \arguments{
-\item{...}{Individual learners and pipelines to train. Lists of learners can be specified
-(say outputs of \code{lrn_grid}) and are flattened into individual learners.}
+\item{...}{Individual \code{SL_Learner} objects, \code{SL_Pipeline}
+objects, or lists of learners (e.g. from \code{lrn_grid}). All are
+flattened into a single collection. Pipelines are kept as atomic units
+and not flattened.}
 }
 \value{
-An object of class \code{SL_Learner_Collection} to hand into \code{setup_ensemble}
+A named list of class \code{SL_Learner_Collection} where each
+element is either an \code{SL_Learner} or an \code{SL_Pipeline}.
 }
 \description{
-Collect individual learners and pipelines in a \code{train_ensemble}-friendly format.
+Collect learners and pipelines into a setup-ready format
 }

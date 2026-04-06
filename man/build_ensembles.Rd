@@ -4,41 +4,30 @@
 \alias{build_ensembles}
 \title{Fit ensembles across inner folds without retaining fitted learner objects}
 \usage{
-build_ensembles(
-  cv,
-  learners,
-  metalearners,
-  loss_fun_list,
-  x,
-  y,
-  future_pkgs = character(0L)
-)
+build_ensembles(cv, learners, metalearners, x, y, future_pkgs = character(0L))
 }
 \arguments{
 \item{cv}{A \code{nana_cv} with \code{build_sets} populated.}
 
-\item{learners}{A list of \code{SL_Learner} objects.}
+\item{learners}{A list of \code{SL_Learner} or \code{SL_Pipeline} objects.}
 
-\item{metalearners}{A list of metalearner objects.}
-
-\item{loss_fun_list}{A \code{mtl_loss} object.}
+\item{metalearners}{A list of \code{SL_Metalearner} objects.}
 
 \item{x}{Full predictor matrix or data frame.}
 
-\item{y}{Full outcome vector.}
+\item{y}{Full outcome vector or matrix.}
 
 \item{future_pkgs}{Character vector of packages for parallel workers.}
 }
 \value{
 A list of length \code{length(cv$build_sets)}, each element a
-list of fitted metalearner objects (one per metalearner).
+list of fitted metalearner objects with an \code{indices} attribute.
 }
 \description{
-For each set of inner folds (one per outer fold), fits every learner on
-each training set, immediately collects validation predictions as raw
-learner output (preserving type), then discards the fitted object.
-Predictions across folds are combined per learner and passed to
-metalearners. Duplicate validation indices (bootstrap, repeated CV) are
-preserved — the metalearner receives all predictions alongside the
-corresponding y values.
+Iterates learners in the outer loop and folds in the inner loop, enabling
+grid-based early stopping. For each learner, predictions are accumulated
+across all folds before moving to the next learner. List outputs from
+\code{SL_Pipeline} and \code{SL_Grid} objects are spliced into
+\code{preds_list} as independent entries; list outputs from other learner
+types are stored as-is.
 }

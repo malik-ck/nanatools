@@ -1,5 +1,7 @@
 
-
+#==============================================================================
+# For learners
+#==============================================================================
 
 # fit() and predict() generics for individual learners
 
@@ -49,95 +51,86 @@ print.SL_Learner_Fitted <- function(object, ...) {
 #' @param preds A function taking `object` and `data` that returns predictions.
 #' @param ... Hyperparameters. Pass as `name = value` for defaults, or just `name` for required arguments.
 #' @export
-lrn_custom <- function(fit, preds, ...) {
-
-  # 1. Capture the dots as raw expressions
+make_learner_factory <- function(fit, preds, ..., is_metalearner) {
+  factory_ns <- parent.env(environment())
   raw_dots <- substitute(list(...))[-1]
 
-  # Build formal arguments for the constructor
-  constr_args <- pairlist(name = quote(expr = ))
+  # Check whether any names are bad
+  bad_names <- c("name", "fit", "preds")
+  clashing <- intersect(names(raw_dots), bad_names)
+  if (length(clashing) > 0)
+    stop("It is not allowed to pass arguments to 'make_learner_factory' ",
+         "named 'name', 'fit', or 'preds'. Clashing: ",
+         paste(clashing, collapse = ", "))
 
-  # Loop through dots
+  # Check that fit and preds only have as arguments the two arguments they need
+  extra_fit_args <- setdiff(names(formals(fit)), c("x", "y"))
+  extra_preds_args <- setdiff(names(formals(preds)), c("object", "data"))
+  if (length(c(extra_fit_args, extra_preds_args)) > 0)
+    stop("fit and preds must only have (x, y) and (object, data) as arguments, ",
+         "respectively.\nEvery argument you pass into make_learner_factory() ",
+         "is available inside fit() and predict() regardless.", call. = FALSE)
+
+  # Build formals as a plain list using alist() for missing-value sentinels
+  constr_args <- alist(name = )   # name is always required
+
   for (i in seq_along(raw_dots)) {
-    arg_name <- names(raw_dots)[i]
-
+    arg_name <- names(raw_dots)[[i]]
     if (is.null(arg_name) || arg_name == "") {
-      # It's a required argument (no default provided)
-      actual_name <- as.character(raw_dots[[i]])
-      constr_args[actual_name] <- list(quote(expr = ))
+      actual_name        <- as.character(raw_dots[[i]])
+      new_arg            <- alist(x = )
+      names(new_arg)     <- actual_name
+      constr_args        <- c(constr_args, new_arg)
     } else {
-      # It's an argument with a default
-      constr_args[arg_name] <- list(raw_dots[[i]])
+      constr_args[arg_name] <- list(raw_dots[[i]])  # single bracket + list()
     }
   }
 
-  # Define the constructor shell
-  constructor <- function() {}
-
-  # Assign arguments here in a new environment to prevent bloat
+  constructor          <- function() {}
+  hyperparam_names     <- setdiff(names(constr_args), c("name", "is_metalearner"))
   formals(constructor) <- constr_args
+
   body(constructor) <- bquote({
-    current_env <- environment()
-    invisible(as.list(current_env))
-    parent.env(current_env) <- globalenv()
+    p <- mget(.(hyperparam_names), envir = environment())
 
-    wrapped_fit <- function(x, y) {
-      p <- as.list(current_env)
-      p$name <- NULL
-      do.call(.(fit), c(list(x = x, y = y), p))
-    }
+    # Minimal environment: only fit, preds, p, nothing else
+    closure_env <- list2env(p, parent = .(factory_ns))
+    environment(fit)  <- closure_env
+    environment(preds) <- closure_env
+    closure_env$fit <- fit
+    closure_env$preds <- preds
 
-    wrapped_preds <- function(object, data) {
-      p <- as.list(current_env)
-      p$name <- NULL
-      do.call(.(preds), c(list(object = object, data = data), p))
-    }
+    wrapped_fit <- function(x, y) fit(x, y)
+    environment(wrapped_fit) <- closure_env
 
-    # Return the lean SL_Learner object
+    wrapped_preds <- function(object, data) preds(object, data)
+    environment(wrapped_preds) <- closure_env
+
+    if (is_metalearner) assign_class <- c("SL_Metalearner", "SL_Learner") else
+      assign_class <- "SL_Learner"
+
     structure(
-      list(
-        name = name,
-        fit = wrapped_fit,
-        preds = wrapped_preds
-      ),
-      class = "SL_Learner"
+      list(name = name, fit = wrapped_fit, preds = wrapped_preds),
+      class = assign_class
     )
   })
 
-  return(constructor)
+  constructor
 }
 
 get_params <- function(learner) {
-  # Get the environment
   env <- environment(learner$fit)
-  params <- as.list(env)
-
-  # Strip out some additionals
-  exclude_vars <- c("wrapped_fit", "wrapped_preds", "current_env", "name")
-  params[exclude_vars] <- NULL
-
-  return(params)
-}
-
-# A robust helper to find the original function
-extract_original_func <- function(func) {
-  code <- as.list(body(func))
-
-  # Find which line is do.call
-  is_docall <- sapply(code, function(x) {
-    is.call(x) && x[[1]] == quote(do.call)
-  })
-
-  docall_line <- code[[which(is_docall)]]
-  return(docall_line[[2]])
+  reserved <- c("fit", "preds")
+  keys <- setdiff(ls(env), reserved)
+  mget(keys, envir = env)
 }
 
 get_original_fit <- function(learner) {
-  extract_original_func(learner$fit)
+  environment(learner$fit)$fit
 }
 
 get_original_preds <- function(learner) {
-  extract_original_func(learner$preds)
+  environment(learner$fit)$preds
 }
 
 #' @export
@@ -181,3 +174,4 @@ inspect.SL_Learner <- function(learner) {
     params = params
   ))
 }
+

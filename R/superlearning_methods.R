@@ -21,7 +21,7 @@ make_preds_list <- function(fit_objects_fold, newdata) {
 
 # Apply one named metalearner from a fold's ensemble list to a preds_list
 apply_metalearner <- function(ensembles_fold, mtl_name, preds_list) {
-  mtl_names <- vapply(ensembles_fold, `[[`, character(1L), "name")
+  mtl_names <- get_learner_names(ensembles_fold)
   mtl_pos   <- which(mtl_names == mtl_name)
   if (length(mtl_pos) == 0L)
     stop(sprintf("Metalearner '%s' not found in this fold's ensembles.\nAvailable: %s",
@@ -31,9 +31,8 @@ apply_metalearner <- function(ensembles_fold, mtl_name, preds_list) {
 
 # Resolve which metalearner names to use given user input and object state
 resolve_metalearner_names <- function(object, metalearner_name, output_best) {
-  all_mtl_names <- vapply(object$metalearners, `[[`, character(1L), "name")
-  all_lrn_names <- vapply(object$learners,     `[[`, character(1L), "name")
-  all_names     <- c(all_mtl_names, all_lrn_names)
+
+  all_names     <- get_learner_names(object$metalearners)
 
   if (!is.null(metalearner_name)) {
     if (output_best)
@@ -60,58 +59,76 @@ resolve_metalearner_names <- function(object, metalearner_name, output_best) {
 }
 
 
-# ── predict.Ensemble ─────────────────────────────────────────────────────────
 
-#' Predict from a fitted SuperLearner
-#'
-#' @param object A fitted \code{Ensemble} object.
-#' @param newdata New predictor data. For \code{type = "cv"}, defaults to the
-#'   stored training data and predictions are generated on each outer fold's
-#'   validation set. For \code{type = "ensemble"}, predictions are generated
-#'   on the full \code{newdata}.
-#' @param metalearner_name Character vector of metalearner (or learner) names
-#'   to return predictions for. If \code{NULL} and \code{output_best = FALSE},
-#'   all metalearners and learners are returned.
-#' @param output_best Logical. If \code{TRUE} and \code{metalearner_name} is
-#'   \code{NULL}, returns only the best-performing metalearner. Requires outer
-#'   CV.
-#' @param ensemble_fold_id Integer. For \code{type = "ensemble"} with outer CV,
-#'   selects which fold's fitted ensemble to use for prediction.
-#' @param type Character. One of \code{"cv"} or \code{"ensemble"}.
-#' @param ... Ignored.
-#' @return For a single metalearner: a prediction object of the type returned
-#'   by that learner, with an \code{indices} attribute for \code{type = "cv"}.
-#'   For multiple metalearners: a named list of such objects.
+# ── predict.Ensemble ─────────────────────────────────────────────────────────
+# ── Internal helper: build preds_list from fit_objects for one fold ────────
+make_preds_list <- function(fit_objects_fold, newdata) {
+  preds_list <- list()
+  for (j in seq_along(fit_objects_fold)) {
+    fitted_lrn <- fit_objects_fold[[j]]
+    raw <- tryCatch(
+      predict(fitted_lrn, newdata = newdata),
+      error = function(e) {
+        warning(sprintf(
+          "Learner '%s' failed during prediction: %s",
+          get_lrn_display_name(fitted_lrn), conditionMessage(e)
+        ))
+        NULL
+      }
+    )
+    if (is.null(raw)) next
+
+    # Splice pipeline/grid outputs as independent entries
+    if (is.list(raw) && !is.data.frame(raw) &&
+        inherits(fitted_lrn, c("SL_Pipeline_Fitted", "SL_Grid_Fitted"))) {
+      # Skip errored paths
+      for (nm in names(raw)) {
+        if (inherits(raw[[nm]], "SL_Pipeline_Path_Error")) {
+          warning(sprintf("Pipeline path '%s' errored during prediction and is skipped.", nm))
+          next
+        }
+        preds_list[[nm]] <- raw[[nm]]
+      }
+    } else {
+      preds_list[[get_lrn_display_name(fitted_lrn)]] <- raw
+    }
+  }
+  if (length(preds_list) == 0L)
+    stop("All learners failed during prediction.")
+  preds_list
+}
+
+
 #' @export
 predict.Ensemble <- function(object,
-                           newdata          = NULL,
-                           metalearner_name = NULL,
-                           output_best      = FALSE,
-                           ensemble_fold_id = NULL,
-                           type             = NULL,
-                           ...) {
+                             newdata          = NULL,
+                             metalearner_name = NULL,
+                             output_best      = FALSE,
+                             ensemble_fold_id = NULL,
+                             type             = NULL,
+                             ...) {
 
   # ── Validate type ──────────────────────────────────────────────────────────
   if (is.null(type))
-    stop("Please provide `type`: 'cv' for cross-validated predictions or 'ensemble' for ensemble predictions.")
+    stop("Please provide `type`: 'cv' for cross-validated predictions or ",
+         "'ensemble' for ensemble predictions.")
   type <- match.arg(type, c("cv", "ensemble"))
 
   # ── Resolve metalearner names ──────────────────────────────────────────────
   use_names <- resolve_metalearner_names(object, metalearner_name, output_best)
 
   # ══════════════════════════════════════════════════════════════════════════
-  # type = "cv": predict on validation sets of the original outer folds
+  # type = "cv"
   # ══════════════════════════════════════════════════════════════════════════
   if (type == "cv") {
 
     if (!object$was_cv_ensemble)
-      stop(paste0("Cross-validated predictions require outer CV. ",
-                  "Refit with a non-NULL `outer_cv`."))
+      stop("Cross-validated predictions require outer CV. ",
+           "Refit with a non-NULL `outer_cv`.")
 
     if (is.null(newdata)) {
       if (is.null(object$x))
-        stop(paste0("No data stored in object. ",
-                    "Refit with `return_data = TRUE` or supply `newdata`."))
+        stop("No data stored. Refit with `return_data = TRUE` or supply `newdata`.")
       newdata <- object$x
     } else {
       if (!is.null(dim(newdata)) && !is.null(dim(object$x)))
@@ -122,7 +139,6 @@ predict.Ensemble <- function(object,
     perf_folds <- object$cv$performance_sets
     n_folds    <- length(perf_folds)
 
-    # For each requested metalearner, collect predictions across outer folds
     result <- lapply(use_names, function(nm) {
 
       chunks <- lapply(seq_len(n_folds), function(i) {
@@ -133,16 +149,16 @@ predict.Ensemble <- function(object,
         list(idx = val, preds = preds)
       })
 
-      all_idx   <- unlist(lapply(chunks, `[[`, "idx"))
-      all_preds <- combine_preds(lapply(chunks, `[[`, "preds"))
-      sort_ord  <- order(all_idx)
+      all_idx  <- unlist(lapply(chunks, `[[`, "idx"))
+      combined <- combine_preds(lapply(chunks, `[[`, "preds"))
+      sort_ord <- order(all_idx)
 
-      sorted_preds <- if (is.data.frame(all_preds) || is.matrix(all_preds))
-        all_preds[sort_ord, , drop = FALSE]
+      sorted <- if (is.data.frame(combined) || is.matrix(combined))
+        combined[sort_ord, , drop = FALSE]
       else
-        all_preds[sort_ord]
+        combined[sort_ord]
 
-      structure(sorted_preds, indices = all_idx[sort_ord])
+      structure(sorted, indices = all_idx[sort_ord])
     })
     names(result) <- use_names
 
@@ -151,7 +167,7 @@ predict.Ensemble <- function(object,
   }
 
   # ══════════════════════════════════════════════════════════════════════════
-  # type = "ensemble": predict on newdata using a specific fitted ensemble
+  # type = "ensemble"
   # ══════════════════════════════════════════════════════════════════════════
   if (type == "ensemble") {
 
@@ -159,24 +175,22 @@ predict.Ensemble <- function(object,
       warning("`ensemble_fold_id` is ignored for non-cross-validated objects.")
 
     if (object$was_cv_ensemble && is.null(ensemble_fold_id))
-      stop(paste0(
-        "For a cross-validated object, provide `ensemble_fold_id` to select ",
-        "which fold's ensemble to use.\n",
-        "Consider refitting without outer CV using only the best metalearner ",
-        "for a single production ensemble."
-      ))
+      stop("For a cross-validated object, provide `ensemble_fold_id` to select ",
+           "which fold's ensemble to use.\n",
+           "Consider refitting without outer CV using only the best metalearner.")
 
     if (!object$was_cv_ensemble)
       ensemble_fold_id <- 1L
 
     if (is.null(newdata)) {
       if (is.null(object$x))
-        stop(paste0("No data stored in object. ",
-                    "Refit with `return_data = TRUE` or supply `newdata`."))
+        stop("No data stored. Refit with `return_data = TRUE` or supply `newdata`.")
       newdata <- object$x
     }
 
-    preds_list <- make_preds_list(object$fit_objects[[ensemble_fold_id]], newdata)
+    preds_list <- make_preds_list(
+      object$fit_objects[[ensemble_fold_id]], newdata
+    )
 
     result <- lapply(use_names, function(nm)
       apply_metalearner(object$ensembles[[ensemble_fold_id]], nm, preds_list)
@@ -234,8 +248,8 @@ loss.Ensemble <- function(object,
   # ── Get predictions for all metalearners ──────────────────────────────────
   # Always request all metalearners so we return a complete loss table
   all_names <- c(
-    vapply(object$metalearners, `[[`, character(1L), "name"),
-    vapply(object$learners,     `[[`, character(1L), "name")
+    get_learner_names(object$metalearners),
+    get_learner_names(object$learners)
   )
 
   get_preds <- suppressWarnings(predict(

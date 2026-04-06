@@ -377,3 +377,18 @@ get_funs <- function(x) {
 subset_y <- function(y, idx) {
   if (is.null(dim(y))) y[idx] else y[idx, , drop = FALSE]
 }
+
+# To extract learner names
+get_learner_names <- function(learners) {
+  unlist(lapply(learners, function(x) {
+    if (inherits(x, "SL_Pipeline")) x$path_names
+    else x$name
+  }))
+}
+
+get_lrn_display_name <- function(lrn) {
+  if (inherits(lrn, "SL_Pipeline"))
+    paste(lrn$path_names, collapse = "|")
+  else
+    lrn$name
+}

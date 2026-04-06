@@ -2,26 +2,32 @@
 % Please edit documentation in R/ensemble_pipelines.R
 \name{make_pipeline}
 \alias{make_pipeline}
-\title{Make a pipeline for use in ensembles.}
+\title{Make a pipeline of learners for use in ensembles}
 \usage{
 make_pipeline(...)
 }
 \arguments{
-\item{...}{Learners or lists of learners in the order they are to be executed.
-See \code{details} to understand how to set up a valid piepline.}
+\item{...}{Learners (\code{SL_Learner}) or lists of learners in the order
+they are to be executed. The first argument must be a single
+\code{SL_Learner}. Each subsequent argument receives the predictions of
+all learners in the previous argument as its \code{x}. If an argument
+is a list of learners, the pipeline branches — one independent branch
+per learner — multiplying the number of terminal outputs. The terminal
+outputs (last stage) are what the metalearner receives as
+\code{preds_list} entries.}
 }
 \value{
-An object of class \code{SL_Pipeline} to hand into \code{collect_learners}
+An object of class \code{SL_Pipeline}.
 }
 \description{
-Make a pipeline for use in ensembles.
+Make a pipeline of learners for use in ensembles
 }
 \details{
-\code{make_pipeline} admits both individual learners (class \code{SL_Learner}), and lists of
-learners. However, it is imperative that the first argument is an \code{SL_Learner}.
-The pipeline starts by training it and handing its predictions into the learner or learners
-in the next argument. The output of training on a pipeline are the learner(s) specified in its last argument.
-Note that, if the next argument is a list of learners, all current learners are handed into each next learner, so the output grows quickly without care.
-Pipeline objects can be handed into \code{collect_learners}. Multiple pipelines can be specified,
-also alongside individual \code{SL_Learner} objects.
+Learners designed for pipeline use should have \code{predict} functions
+that return objects usable as \code{x} for the next learner. A screener's
+\code{predict} might return a column-subsetted matrix; a basis expander's
+\code{predict} might return a transformed feature matrix; a standard
+learner's \code{predict} returns a prediction vector. The pipeline places
+no constraints on these types — compatibility between adjacent nodes is
+the user's responsibility.
 }

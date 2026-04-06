@@ -397,3 +397,10 @@ outcome_folds <- function(cv, task, outcome_name) {
 
   exclude(cv, censored_idx)
 }
+
+
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# A few templates for CV fold creation
+# ══════════════════════════════════════════════════════════════════════════════

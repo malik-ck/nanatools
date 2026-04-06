@@ -1,10 +1,33 @@
+# Family guesser so that family can be auto
+family_guesser <- function(y) {
+  unique_vals <- unique(y)
+
+  # Binary (Strictly 0 and 1)
+  if (length(unique_vals) == 2 && all(unique_vals %in% c(0, 1))) {
+    return(stats::binomial())
+  }
+
+  # Proportions (between 0 and 1, but not strictly binary)
+  if (all(y >= 0 & y <= 1)) {
+    return(stats::quasibinomial())
+  }
+
+  # 3. Counts (non-negative Integers)
+  if (all(y >= 0) && all(y == floor(y))) {
+    return(stats::poisson())
+  }
+
+  # Anything else
+  return(stats::gaussian())
+}
 
 
 # Template for empirical mean
 #' @export
-lrn_mean <- lrn_custom(
+lrn_mean <- make_learner_factory(
   fit = function(x, y) mean(y),
-  preds = function(object, data) rep(object, nrow(data))
+  preds = function(object, data) rep(object, nrow(data)),
+  is_metalearner = FALSE
 )
 
 # Template for GLM
@@ -20,8 +43,8 @@ lrn_glm <- function(name, family, offset = NULL) {
   }
 
   return(
-    lrn_custom(
-      fit = function(x, y, family, offset, ...) {
+    make_learner_factory(
+      fit = function(x, y) {
 
         if (identical(family, "auto")) family <- family_guesser(y)
 
@@ -55,7 +78,7 @@ lrn_glm <- function(name, family, offset = NULL) {
         return(list(model = get_model, instructions = instr_list))
       },
 
-      preds = function(object, data, ...) {
+      preds = function(object, data) {
         if (!identical(object[["instructions"]], "skip")) {
           data <- make_safe_matrix(data, object[["instructions"]])
         }
@@ -63,7 +86,8 @@ lrn_glm <- function(name, family, offset = NULL) {
         return(as.vector(predict(object[["model"]], newdata = data, type = "response")))
       },
       family,
-      offset
+      offset = NULL,
+      is_metalearner = FALSE
     )(name = name, family = family, offset = offset)
   )
 }
@@ -929,71 +953,55 @@ lrn_bigGlm <- function(name, family, offset = NULL, frm = NULL) {
 lrn_ranger <- function(name, select_vars = NULL, num.trees = 500, mtry = NULL, probability = FALSE,
                        min.node.size = NULL, min.bucket = NULL, max.depth = NULL, splitrule = NULL) {
 
-  # Force evaluation of things to ensure they are available later...
-  force(name)
-  force(num.trees)
-  force(mtry)
-  force(probability)
-  force(min.node.size)
-  force(min.bucket)
-  force(max.depth)
-  force(splitrule)
-  force(select_vars)
+  return(
+    make_learner_factory(
+      fit = function(x, y) {
 
-  fit <- function(x, y) {
+        # First, if select_vars is provided, subset x
+        if (!is.null(select_vars)) {
+          x <- x[,select_vars]
+        }
 
-    # First, if select_vars is provided, subset x
-    if (!is.null(select_vars)) {
-      x <- x[,select_vars]
-    }
+        # Make a safe matrix if necessary
+        if (is.data.frame(x)) {
+          instr_list <- create_instruction_list(x)
+          x <- make_safe_matrix(x, instr_list)
+        } else {
+          instr_list <- "skip"
+        }
 
-    # Make a safe matrix if necessary
-    if (is.data.frame(x)) {
-      instr_list <- create_instruction_list(x)
-      x <- make_safe_matrix(x, instr_list)
-    } else {
-      instr_list <- "skip"
-    }
+        # Need a data frame for ranger
+        x_df <- data.frame(x)
 
-    # Need a data frame for ranger
-    x_df <- data.frame(x)
+        # Can now fit!
+        return(list(
+          model = ranger::ranger(x = x_df, y = y, num.trees = num.trees, mtry = mtry,
+                                 probability = probability, min.node.size = min.node.size,
+                                 min.bucket = min.bucket, max.depth = max.depth,
+                                 splitrule = splitrule),
+          instructions = instr_list
+        ))
 
-    # Can now fit!
-    return(list(
-      model = ranger::ranger(x = x_df, y = y, num.trees = num.trees, mtry = mtry,
-                             probability = probability, min.node.size = min.node.size,
-                             min.bucket = min.bucket, max.depth = max.depth,
-                             splitrule = splitrule),
-      instructions = instr_list
-    ))
+      },
+      preds = function(object, data) {
 
-  }
+        # Apply instruction list if necessary
+        if (!identical(object[["instructions"]], "skip")) {
+          data <- make_safe_matrix(data, object[["instructions"]])
+        }
 
-  preds <- function(object, data) {
+        # Then need to coerce to data frame either way
+        data <- data.frame(data)
 
-    # Apply instruction list if necessary
-    if (!identical(object[["instructions"]], "skip")) {
-      data <- make_safe_matrix(data, object[["instructions"]])
-    }
-
-    # Then need to coerce to data frame either way
-    data <- data.frame(data)
-
-    # Then output
-    return(as.vector(predict(object[["model"]], data = data, type = "response")$predictions))
-
-  }
-
-  get_list <- list(
-    name = name,
-    fit = fit,
-    preds = preds
+        # Then output
+        return(as.vector(predict(object[["model"]], data = data, type = "response")$predictions))
+      },
+      select_vars = NULL, num.trees = 500, mtry = NULL, probability = FALSE,
+      min.node.size = NULL, min.bucket = NULL, max.depth = NULL, splitrule = NULL
+    )(name = name, select_vars = select_vars, num.trees = num.trees, mtry = mtry,
+      probability = probability, min.node.size = min.node.size, min.bucket = min.bucket,
+      max.depth = max.depth, splitrule = splitrule)
   )
-
-  class(get_list) <- "SL_Learner"
-
-  return(get_list)
-
 }
 
 
@@ -1048,7 +1056,7 @@ lrn_xgboost <- function(name, select_vars = NULL, nrounds = 200, max_depth = 3,
 
 # Learner grid maker for CV
 #' @export
-lrn_grid <- function(name_prefix, learner, ...) {
+make_learner_grid <- function(name_prefix, learner, ...) {
 
   # Create the hyperparameter grid
   grid <- expand.grid(..., stringsAsFactors = FALSE)
@@ -1065,29 +1073,6 @@ lrn_grid <- function(name_prefix, learner, ...) {
   # Create each learner
   learners <- do.call(Map, c(f = learner, as.list(grid)))
   learners
-}
-
-# Family guesser so that family can be auto
-family_guesser <- function(y) {
-  unique_vals <- unique(y)
-
-  # Binary (Strictly 0 and 1)
-  if (length(unique_vals) == 2 && all(unique_vals %in% c(0, 1))) {
-    return(stats::binomial())
-  }
-
-  # Proportions (between 0 and 1, but not strictly binary)
-  if (all(y >= 0 & y <= 1)) {
-    return(stats::quasibinomial())
-  }
-
-  # 3. Counts (non-negative Integers)
-  if (all(y >= 0) && all(y == floor(y))) {
-    return(stats::poisson())
-  }
-
-  # Anything else
-  return(stats::gaussian())
 }
 
 # Learner for bam, which are fast GAMs

@@ -98,11 +98,21 @@ setup_ensemble <- function(learners, metalearners = list(mtl_selector("Selected"
   # An AUC-based metalearner might be a nice addition for the future
 
   # Check that names across learners and metalearners are unique
+  names_lrn <- lapply(learners, function(x) {
+    if (inherits(x, "SL_Pipeline")) enum_names <- x$path_names
+    else enum_names <- x$name
+    return(enum_names)
+  })
 
-  get_lrn_names <- c(lapply(learners, function(x) x$name),
-                     lapply(metalearners, function(x) x$name))
+  names_mtl <- lapply(metalearners, function(x) {
+    if (inherits(x, "SL_Pipeline")) enum_names <- x$path_names
+    else enum_names <- x$name
+    return(enum_names)
+  })
 
-  if (length(get_lrn_names) != length(unique(get_lrn_names))) {
+  enum_all_names <- c(unlist(names_lrn), unlist(names_mtl))
+
+  if (length(enum_all_names) != length(unique(enum_all_names))) {
     stop("Please ensure that learner names are unique.\nNames can also not be shared between learners and metalearners.")
   }
 
@@ -119,7 +129,7 @@ setup_ensemble <- function(learners, metalearners = list(mtl_selector("Selected"
   return_list <- list(
     learners = learners,
     metalearners = metalearners,
-    loss_fun_list = loss,
+    loss_fun = loss,
     future_pkgs = depends_pkgs
   )
 
@@ -175,7 +185,7 @@ train_ensemble <- function(init, cv_instructions, x, y, return_data = TRUE) {
 
   # One typecheck here after resolving CV instructions
   if (!is.null(init$metalearners) && is.null(cv$build_sets)) {
-    warning("Metalearners passed without inner cross-validation, which is required to build them. They are removed")
+    warning("Metalearners passed without inner cross-validation, which is required to build them. They are removed.")
     init$metalearners <- NULL
   }
 
@@ -191,27 +201,13 @@ train_ensemble <- function(init, cv_instructions, x, y, return_data = TRUE) {
       cv           = cv,
       learners     = init$learners,
       metalearners = init$metalearners,
-      loss_fun_list = init$loss_fun_list,
       x            = x,
       y            = y,
       future_pkgs  = init$future_pkgs
     )
-  } else {
-    # No inner CV — empty ensemble slot per outer fold (or one if no outer CV)
-    # Ensures that learners that are "made to be metalearners" have something to be appended to right below
-    n_slots <- if (ensemble_cv) length(cv$performance_sets) else 1L
-    vector("list", n_slots)
   }
 
-  # ── 5. Append per-learner "fake" metalearners ─────────────────────────────
-  # This preserves the original behaviour: each individual learner is
-  # accessible via the same prediction machinery as a real ensemble.
-  add_mtl_list <- lapply(seq_along(init$learners), function(i)
-    fit(mtl_learner(init$learners[[i]]$name, i))
-  )
-  get_all_ensembles <- lapply(get_all_ensembles, c, add_mtl_list)
-
-  # ── 6. Fit learners on outer fold training sets ───────────────────────────
+  # ── 5. Fit learners on outer fold training sets ───────────────────────────
   # If no outer CV, train on the full dataset (one synthetic fold).
   perf_folds <- if (ensemble_cv) {
     cv$performance_sets
@@ -223,8 +219,7 @@ train_ensemble <- function(init, cv_instructions, x, y, return_data = TRUE) {
     )))
   }
 
-  # fit_ensemble() returns: list over learners, each a list over folds
-  # get_all_learners[[j]][[i]] = j-th learner fitted on i-th fold training set
+  # Train all learners
   get_all_learners <- fit_ensemble(
     x           = x,
     y           = y,
@@ -233,31 +228,18 @@ train_ensemble <- function(init, cv_instructions, x, y, return_data = TRUE) {
     future_pkgs = init$future_pkgs
   )
 
-  # ── 7. Find best metalearner via cross-validated loss ────────────────────
-  best_metalearner <- if (ensemble_cv) {
-    find_best_metalearner(
-      x             = x,
-      y             = y,
-      perf_folds    = cv$performance_sets,
-      all_learners  = get_all_learners,
-      all_ensembles = get_all_ensembles,
-      loss_fun      = init$loss_fun_list$loss_fun
-    )
-  } else NULL
-
-  # ── 8. Assemble return object ─────────────────────────────────────────────
+  # ── 6. Assemble return object ─────────────────────────────────────────────
   return_list <- list(
     x                 = if (return_data) x else NULL,
     y                 = if (return_data) y else NULL,
     learners          = init$learners,
     metalearners      = init$metalearners,
     metalearner_count = length(init$metalearners),
-    loss_fun_list     = init$loss_fun_list,
+    loss_fun          = init$loss_fun,
     cv                = cv,
     ensembles         = get_all_ensembles,
     fit_objects       = get_all_learners,
-    was_cv_ensemble   = ensemble_cv,
-    best_metalearner  = best_metalearner
+    was_cv_ensemble   = ensemble_cv
   )
 
   class(return_list) <- "Ensemble"
@@ -291,145 +273,153 @@ fit_ensemble <- function(x, y, perf_folds, learners, future_pkgs) {
 }
 
 
-# ── Helper: find best metalearner across outer folds ──────────────────────
-
-#' Compute mean CV loss per metalearner and return the best name
-#'
-#' @param x Full predictor matrix or data frame.
-#' @param y Full outcome vector.
-#' @param perf_folds A \code{nana_fold_list} of performance folds.
-#' @param all_learners Output of \code{fit_ensemble()}: list over learners,
-#'   each a list over folds.
-#' @param all_ensembles Output of \code{build_ensembles()} with fake
-#'   per-learner metalearners appended: list over outer folds, each a list
-#'   of fitted metalearner objects.
-#' @param loss_fun A function \code{function(y, preds)} returning a scalar
-#'   loss.
-#' @return Character scalar naming the metalearner with minimum mean CV loss.
-find_best_metalearner <- function(x, y, perf_folds, all_learners,
-                                  all_ensembles, loss_fun) {
-
-  n_folds <- length(perf_folds)
-
-  fold_losses <- lapply(seq_len(n_folds), function(i) {
-    fold <- perf_folds[[i]]
-    val  <- validation_set(fold)
-
-    # Predictions from each learner on this fold's validation set
-    # all_learners[[j]][[i]] = j-th learner fitted on i-th fold
-    preds_list <- lapply(seq_along(all_learners[[i]]), function(j)
-      predict(all_learners[[i]][[j]], newdata = x[val, , drop = FALSE])
-    )
-    names(preds_list) <- vapply(all_learners[[i]], `[[`, character(1L), "name")
-
-    y_val <- subset_y(y, val)
-
-    # Loss per metalearner on this fold
-    vapply(all_ensembles[[i]], function(mtl) {
-      ensembled <- predict(mtl, preds_list)
-      mean(loss_fun(y_val, ensembled))
-    }, numeric(1L))
-  })
-
-  # Average loss across folds; names come from the first fold's metalearners
-  loss_mat   <- do.call(rbind, fold_losses)
-  mean_loss  <- colMeans(loss_mat)
-
-  # Metalearner names — use the name slot on each fitted metalearner
-  mtl_names  <- vapply(all_ensembles[[1L]], `[[`, character(1L), "name")
-  names(mean_loss) <- mtl_names
-
-  names(which.min(mean_loss))
-}
-
 
 #' Fit ensembles across inner folds without retaining fitted learner objects
 #'
-#' For each set of inner folds (one per outer fold), fits every learner on
-#' each training set, immediately collects validation predictions as raw
-#' learner output (preserving type), then discards the fitted object.
-#' Predictions across folds are combined per learner and passed to
-#' metalearners. Duplicate validation indices (bootstrap, repeated CV) are
-#' preserved — the metalearner receives all predictions alongside the
-#' corresponding y values.
+#' Iterates learners in the outer loop and folds in the inner loop, enabling
+#' grid-based early stopping. For each learner, predictions are accumulated
+#' across all folds before moving to the next learner. List outputs from
+#' \code{SL_Pipeline} and \code{SL_Grid} objects are spliced into
+#' \code{preds_list} as independent entries; list outputs from other learner
+#' types are stored as-is.
 #'
 #' @param cv A \code{nana_cv} with \code{build_sets} populated.
-#' @param learners A list of \code{SL_Learner} objects.
-#' @param metalearners A list of metalearner objects.
-#' @param loss_fun_list A \code{mtl_loss} object.
+#' @param learners A list of \code{SL_Learner} or \code{SL_Pipeline} objects.
+#' @param metalearners A list of \code{SL_Metalearner} objects.
 #' @param x Full predictor matrix or data frame.
-#' @param y Full outcome vector.
+#' @param y Full outcome vector or matrix.
 #' @param future_pkgs Character vector of packages for parallel workers.
 #' @return A list of length \code{length(cv$build_sets)}, each element a
-#'   list of fitted metalearner objects (one per metalearner).
+#'   list of fitted metalearner objects with an \code{indices} attribute.
 #' @export
-build_ensembles <- function(cv, learners, metalearners, loss_fun_list,
+build_ensembles <- function(cv, learners, metalearners,
                             x, y, future_pkgs = character(0L)) {
   if (!inherits(cv, "nana_cv"))
     stop("`cv` must be a nana_cv object.")
   if (is.null(cv$build_sets))
     stop("No build folds found. Please add them before calling build_ensembles().")
 
-  lrn_names <- vapply(learners, `[[`, character(1L), "name")
+  splice_classes <- c("SL_Pipeline", "SL_Grid")
+
+  should_splice <- function(obj, preds) {
+    is.list(preds) &&
+      !is.data.frame(preds) &&
+      any(vapply(splice_classes, function(cl) inherits(obj, cl), logical(1L)))
+  }
 
   future.apply::future_lapply(cv$build_sets, function(inner_folds) {
 
-    # ── Step 1: accumulate (idx, raw predictions) per fold ────────────────
-    # fold_results: list over folds, each a list with $idx and $preds
-    # $preds is a named list over learners containing raw learner output
-    fold_results <- vector("list", length(inner_folds))
+    fold_data <- lapply(inner_folds, function(fold) {
+      tr  <- training_set(fold)
+      val <- validation_set(fold)
+      list(
+        tr    = tr,
+        val   = val,
+        x_tr  = x[tr,  , drop = FALSE],
+        y_tr  = subset_y(y, tr),
+        x_val = x[val, , drop = FALSE]
+      )
+    })
 
-    ### If I ever want to implement optimization on grids (say random sample from CV setups),
-    ### I think I would need to swap the order from iterate folds -> iterate learners to learners -> folds.
-    ### Then finishing an inner iteration trains a learner on each fold, which is where grid logic could live.
-    for (k in seq_along(inner_folds)) {
-      fold  <- inner_folds[[k]]
-      tr    <- training_set(fold)
-      val   <- validation_set(fold)
-      x_tr  <- x[tr,  , drop = FALSE]
-      y_tr  <- subset_y(y, tr)
-      x_val <- x[val, , drop = FALSE]
+    all_idx <- unlist(lapply(fold_data, `[[`, "val"))
 
-      fold_preds <- vector("list", length(learners))
-      names(fold_preds) <- lrn_names
+    preds_list      <- list()
+    failed_learners <- character(0L)
 
-      for (j in seq_along(learners)) {
-        fitted_lrn       <- fit(learners[[j]], x_tr, y_tr)
-        fold_preds[[j]]  <- predict(fitted_lrn, newdata = x_val)
-        rm(fitted_lrn)
+    for (j in seq_along(learners)) {
+      lrn         <- learners[[j]]
+      is_grid     <- inherits(lrn, "SL_Grid")
+      lrn_nm      <- get_lrn_display_name(lrn)
+      fold_chunks <- vector("list", length(inner_folds))
+
+      for (k in seq_along(inner_folds)) {
+        fd <- fold_data[[k]]
+
+        fold_chunks[[k]] <- tryCatch({
+          fitted_lrn <- fit(lrn, fd$x_tr, fd$y_tr)
+          out        <- predict(fitted_lrn, newdata = fd$x_val)
+          rm(fitted_lrn)
+          list(idx = fd$val, preds = out, failed = FALSE)
+        }, error = function(e) {
+          warning(sprintf(
+            "Learner '%s' failed on fold %d: %s",
+            lrn_nm, k, conditionMessage(e)
+          ))
+          list(idx = fd$val, preds = NULL, failed = TRUE)
+        })
       }
 
-      fold_results[[k]] <- list(idx = val, preds = fold_preds)
-      rm(x_tr, y_tr, x_val)
+      # ── Grid early stopping ──────────────────────────────────────────────
+      if (is_grid && !is.null(lrn$should_stop)) {
+        surviving <- lrn$should_stop(fold_chunks, y, all_idx)
+        for (nm in names(surviving))
+          preds_list[[nm]] <- combine_preds(
+            lapply(fold_chunks, function(fc) fc$preds[[nm]])
+          )
+        next
+      }
+
+      # ── Check for any fold failure ────────────────────────────────────
+      failed_folds <- which(vapply(fold_chunks, `[[`, logical(1L), "failed"))
+
+      if (length(failed_folds) > 0L) {
+        warning(sprintf(
+          "Learner '%s' failed on fold(s) %s and is excluded from the ensemble.",
+          lrn_nm, paste(failed_folds, collapse = ", ")
+        ))
+        failed_learners <- c(failed_learners, lrn_nm)
+        rm(fold_chunks)
+        next
+      }
+
+      # ── Combine across folds ──────────────────────────────────────────
+      # Check splice on the first fold's prediction, not on the combined result
+      first_pred <- fold_chunks[[1L]]$preds
+
+      if (should_splice(lrn, first_pred)) {
+        # Pipeline/Grid: combine each path's predictions across folds separately
+        path_nms <- names(first_pred)
+        for (nm in path_nms) {
+          path_chunks     <- lapply(fold_chunks, function(fc) fc$preds[[nm]])
+          preds_list[[nm]] <- combine_preds(path_chunks)
+        }
+      } else {
+        combined          <- combine_preds(lapply(fold_chunks, `[[`, "preds"))
+        preds_list[[lrn_nm]] <- combined
+        rm(combined)
+      }
+
+      rm(fold_chunks)
     }
 
-    # ── Step 2: Combine predictions across folds
-    all_idx   <- unlist(lapply(fold_results, `[[`, "idx"))
-    all_preds_per_learner <- lapply(lrn_names, function(nm)
-      combine_preds(lapply(fold_results, function(fr) fr$preds[[nm]]))
-    )
-    names(all_preds_per_learner) <- lrn_names
+    if (length(preds_list) == 0L)
+      stop("All learners failed on all folds. Cannot build ensemble.")
+
     y_sub <- structure(subset_y(y, all_idx), indices = all_idx)
 
-    # ── Step 3: fit metalearners — preds_list goes out of scope after ──────
-
     fitted_metalearners <- lapply(metalearners, function(mtl)
-      fit(mtl, y = y_sub, preds_list = all_preds_per_learner,
-          loss_fun_list = loss_fun_list)
+      fit(mtl, x = preds_list, y = y_sub)
     )
 
-    rm(fold_results, all_preds_per_learner, y_sub)
-    structure(fitted_metalearners, indices = all_idx)
+    rm(fold_data, preds_list, y_sub)
+
+    structure(
+      fitted_metalearners,
+      indices         = all_idx,
+      failed_learners = if (length(failed_learners) > 0L) failed_learners else NULL
+    )
 
   }, future.packages = c(future_pkgs, "nanatools"),
-  future.globals = list(
-    x             = x,
-    y             = y,
-    learners      = learners,
-    metalearners  = metalearners,
-    loss_fun_list = loss_fun_list,
-    lrn_names     = lrn_names,
-    combine_preds = combine_preds
+  future.globals  = list(
+    x               = x,
+    y               = y,
+    learners        = learners,
+    metalearners    = metalearners,
+    combine_preds   = combine_preds,
+    subset_y        = subset_y,
+    should_splice   = should_splice,
+    splice_classes  = splice_classes,
+    get_lrn_display_name = get_lrn_display_name
   ),
   future.seed = TRUE)
 }
